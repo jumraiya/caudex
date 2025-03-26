@@ -6,13 +6,21 @@
   Operators like Map or Join can contain conditions for filtering on joining dependent on above types in the form of [pred v-1 v-2 input-val ...].
   e.g. join(input-1: [?e :attr ?v] input-2: [?v :attr2 23]) -> [?e ?v ?x]
   where join conditions are [= {:input-idx 0 :val-idx 2} {:input-idx 1 :val-idx 0}]
-  and [= {:input-idx 1 :val-idx 2} 23]")
+  and [= {:input-idx 1 :val-idx 2} 23]"
+  (:require [clojure.core.protocols :refer [Datafiable]]))
 
 (defprotocol Operator
   (-get-id [this])
   (-get-op-type [this])
   (-get-input-types [this])
   (-get-output-type [this]))
+
+
+(defn datafy-op [op]
+  {:id (-get-id op)
+   :type (-get-op-type op)
+   :inputs (-get-input-types op)
+   :output (-get-output-type op)})
 
 ;; Defines a zset "type", a concatenation of vars contained in zsets joined to create this one
 (defprotocol ZSetType
@@ -120,3 +128,16 @@
   (-get-input-types [_] [input-type input-type])
   (-get-output-type [_] input-type))
 
+(extend-protocol Datafiable
+  RootOperator
+  (datafy [this] (datafy-op this))
+  MapOperator
+  (datafy [this] (datafy-op this))
+  NegOperator
+  (datafy [this] (datafy-op this))
+  DelayOperator
+  (datafy [this] (datafy-op this))
+  JoinOperator
+  (datafy [this] (datafy-op this))
+  AddOperator
+  (datafy [this] (datafy-op this)))

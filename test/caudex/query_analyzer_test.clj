@@ -116,4 +116,33 @@
                    [{:src '?a :dest '?ap}
                     {:src '?ap :dest "rule-0" :label [:arg 0]}
                     {:src '?p :dest "rule-0" :label [:arg 1]}])
-                  rule-edges)))))
+                  rule-edges))))
+  (testing "Marking required args to or, not joins and rules"
+    (let [{:keys [graph]} (q/analyze
+                           '[:find ?a ?b
+                             :where
+                             [?a :attr "asd"]
+                             (or-join [?a ?b]
+                                      [?a :attr-2 ?b]
+                                      (and [?a :attr-3 ?c]
+                                           [(< ?b ?c)]))])
+          edges (mapv #(vector % (uber/attr graph % :required?))
+                      (uber/in-edges graph "or-0"))
+          {:keys [graph]} (q/analyze
+                           '[:find ?a ?b
+                             :where
+                             [?a :attr "asd"]
+                             (not-join [?a ?b]
+                                       [?a :attr-3 ?c]
+                                       [(< ?b ?c)])])
+          edges-2 (mapv #(vector % (uber/attr graph % :required?))
+                        (uber/in-edges graph (some #(when (uber/ubergraph? %) %)
+                                                   (uber/nodes graph))))]
+      (is (match?
+           (m/in-any-order
+            [[{:src '?a} nil] [{:src '?b} true]])
+           edges))
+      (is (match?
+           (m/in-any-order
+            [[{:src '?a} nil] [{:src '?b} true]])
+           edges-2)))))

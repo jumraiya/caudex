@@ -2,22 +2,27 @@
   (:require
    [ubergraph.core :as uber]
    [caudex.dbsp :as dbsp]
+   [clojure.core.protocols :refer [datafy]]
    [com.phronemophobic.clj-graphviz :refer [render-graph]]))
 
 
+(defn is-op? [in]
+  (satisfies? dbsp/Operator in))
+
+
 (defn op->edn [op]
-  (when (satisfies? dbsp/Operator op)
+  (when (is-op? op)
     {:id (dbsp/-get-id op)
      :type (dbsp/-get-op-type op)
      :inputs (dbsp/-get-input-types op)
      :output (dbsp/-get-output-type op)}))
 
-(defn is-op? [in]
-  (satisfies? dbsp/Operator in))
 
 (defn get-root-node [graph]
   (some
-   #(when (= :root (dbsp/-get-op-type %))
+   #(when (or (and (is-op? %)
+                   (= :root (dbsp/-get-op-type %)))
+              (= 0 (uber/in-degree graph %)))
       %)
    (uber/nodes graph)))
 
@@ -61,7 +66,8 @@
       :flags #{:directed} :default-attributes {:edge {:label "label"}}))))
 #trace
  (defn topsort
-   [circuit & {:keys [start visited cycle-check-fn] :or {start (get-root-node circuit) visited #{}}}]
+   [circuit & {:keys [start visited visited-check-fn]
+               :or {start (get-root-node circuit) visited #{}}}]
    (loop [queue [start] order [] visited visited]
      (let [[cur & queue] queue
            visited (conj visited cur)
@@ -70,10 +76,10 @@
                              (remove #(contains? visited %))
                              (filter #(every?
                                        (fn [in]
-                                         (if cycle-check-fn
-                                          (or (contains? visited (:src in))
-                                              (cycle-check-fn (:src in)))
-                                          (contains? visited (:src in))))
+                                         (if visited-check-fn
+                                           (or (contains? visited (:src in))
+                                               (visited-check-fn (:src in) %))
+                                           (contains? visited (:src in))))
                                        (uber/in-edges circuit %))))
                        (uber/out-edges circuit cur))]
        (if (seq queue)
@@ -83,7 +89,7 @@
          (conj order cur)))))
 
  (defn stratified-topsort
-  [circuit & {:keys [start visited cycle-check-fn] :or {start (get-root-node circuit) visited #{}}}]
+  [circuit & {:keys [start visited visited-check-fn] :or {start (get-root-node circuit) visited #{}}}]
   (loop [queue [start] order [[start]] visited visited]
     (let [visited (into visited queue)
           queue (transduce
@@ -94,9 +100,9 @@
                   (remove #(contains? visited %))
                   (filter #(every?
                             (fn [in]
-                              (if cycle-check-fn
+                              (if visited-check-fn
                                 (or (contains? visited (:src in))
-                                    (cycle-check-fn (:src in)))
+                                    (visited-check-fn (:src in) %))
                                 (contains? visited (:src in))))
                             (uber/in-edges circuit %))))
                  (completing conj)
@@ -114,12 +120,14 @@
 (defn topsort-circuit [circuit & {:keys [stratify?] :as opts}]
   ((if stratify? stratified-topsort topsort)
    circuit
-   (assoc opts :cycle-check-fn
-          #(= :delay (-> % op->edn :type)))))
+   (assoc opts :visited-check-fn
+          (fn [dep _node]
+            (= :delay (-> dep op->edn :type))))))
 
 (defn topsort-query-graph [query-graph & {:keys [stratify?] :as opts}]
-  (prn opts)
   ((if stratify? stratified-topsort topsort)
    query-graph
-   (assoc opts :cycle-check-fn
-          #(= :delay (-> % op->edn :type)))))
+   (assoc opts :visited-check-fn
+          (fn [dep node]
+            (or (not (symbol? dep))
+                (contains? #{:rule :or-join :not-join} (uber/attr query-graph node :type)))))))

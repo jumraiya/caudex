@@ -18,7 +18,40 @@
     datascript.parser.Constant
     (:value v)))
 
+(defn- is-var-required? [graph var]
+  (if (or (some #(when (= :binding (uber/attr graph % :label)) %)
+                (uber/in-edges graph var))
+          (some #(when (= :pattern (uber/attr graph % :clause-type)) %)
+                (uber/out-edges graph var)))
+    false
+    (reduce
+     (fn [res {:keys [dest]}]
+       (case (uber/attr graph dest :type)
+         :or-join (reduce
+                   (fn [res edge]
+                     (if (false? (is-var-required? (:dest edge) var))
+                       (reduced false)
+                       res))
+                   true
+                   (eduction
+                    (filter (fn [e] (= :conj (uber/attr graph e :label))))
+                    (uber/out-edges graph dest)))
+         :not-join (is-var-required? dest var)
+         res))
+     true
+     (uber/out-edges graph var))))
 
+(defn- mark-required-vars [graph node vars]
+  (reduce
+   (fn [g var]
+     (let [edge (uber/find-edge g var node)]
+       (if edge
+        (uber/add-attr g edge :required? true)
+        g)))
+   graph
+   (eduction
+    (filter #(is-var-required? graph %))
+    vars)))
 
 (defn- process-fn-clause [graph clause fn-type counters]
   (let [fn-name (if (= fn-type :rule)
@@ -28,26 +61,26 @@
         fn-node (str fn-name "-" id)
         counters (update counters fn-name #(inc (or % 0)))]
     [(cond->
-      (reduce
-       (fn [g [idx arg]]
-         (let [f-name (if (#{:fn :pred} fn-type)
-                        (-> clause :fn :symbol resolve var-get)
-                        (-> clause :name get-val))]
-           (-> g
-               (uber/add-directed-edges
-                [(get-val arg) fn-node {:label [:arg idx]
-                                        :clause-type (case fn-type
-                                                       :pred :pred-arg
-                                                       :fn :fn-arg
-                                                       :rule :rule-arg)}])
-               (uber/add-attrs fn-node
-                               {:fn f-name
-                                :type fn-type}))))
-       graph
-       (eduction (map-indexed vector) (:args clause)))
-       (= fn-type :fn)
-       (uber/add-directed-edges
-        [fn-node (-> clause :binding :variable :symbol) {:label :binding}]))
+         (reduce
+          (fn [g [idx arg]]
+            (let [f-name (if (#{:fn :pred} fn-type)
+                           (-> clause :fn :symbol resolve var-get)
+                           (-> clause :name get-val))]
+              (-> g
+                  (uber/add-directed-edges
+                   [(get-val arg) fn-node {:label [:arg idx]
+                                           :clause-type (case fn-type
+                                                          :pred :pred-arg
+                                                          :fn :fn-arg
+                                                          :rule :rule-arg)}])
+                  (uber/add-attrs fn-node
+                                  {:fn f-name
+                                   :type fn-type}))))
+          graph
+          (eduction (map-indexed vector) (:args clause)))
+         (= fn-type :fn)
+         (uber/add-directed-edges
+          [fn-node (-> clause :binding :variable :symbol) {:label :binding}]))
      counters]))
 
 (defn- process-where-clauses [graph clauses]
@@ -157,29 +190,35 @@
                    (uber/add-nodes-with-attrs [or-node {:type :or-join}]))
                (eduction (map-indexed (fn [idx var]
                                         [var or-node {:label [:arg idx]}])) vars))
-        counters (assoc counters :or (inc or-id))]
-    (reduce
-     (fn [[graph counters] clause]
-       (let [new-graph (condp = (type clause)
-                         datascript.parser.And
-                         (build-query-graph vars (:clauses clause))
-                         (build-query-graph vars [clause]))
-             conj-id (get counters :conj 0)]
-         [(-> graph
-              (uber/add-nodes-with-attrs [new-graph {:op (str "conj-" conj-id)}])
-              (uber/add-directed-edges [or-node new-graph {:label :conj}]))
-          (update counters :conj #(inc (or % 0)))]))
-     [graph counters]
-     clauses)))
+        counters (assoc counters :or (inc or-id))
+        [graph counters]
+        (reduce
+         (fn [[graph counters] clause]
+           (let [new-graph (condp = (type clause)
+                             datascript.parser.And
+                             (build-query-graph vars (:clauses clause))
+                             (build-query-graph vars [clause]))
+                 conj-id (get counters :conj 0)]
+             [(-> graph
+                  (uber/add-nodes-with-attrs [new-graph {:op (str "conj-" conj-id)}])
+                  (uber/add-directed-edges [or-node new-graph {:label :conj}]))
+              (update counters :conj #(inc (or % 0)))]))
+         [graph counters]
+         clauses)]
+    [(mark-required-vars graph or-node vars) counters]))
 
 (defn- process-not-join [graph {:keys [vars clauses]} counters]
   (let [vars (into #{} (map :symbol vars))
         sub-graph (build-query-graph vars clauses)
         not-id (get counters :not 0)]
-    [(reduce
-      #(uber/add-directed-edges %1 %2)
-      (-> graph
-          (uber/add-nodes-with-attrs [sub-graph {:op (str "not-" not-id) :type :not-join}]))
-      (eduction (map-indexed (fn [idx var]
-                               [var sub-graph {:label [:arg idx]}])) vars))
+    [(mark-required-vars
+      (reduce
+       #(uber/add-directed-edges %1 %2)
+       (-> graph
+           (uber/add-nodes-with-attrs [sub-graph {:op (str "not-" not-id) :type :not-join}]))
+       (eduction
+        (map-indexed (fn [idx var]
+                       [var sub-graph {:label [:arg idx]}])) vars))
+      sub-graph
+      vars)
      (update counters :not #(inc (or % 0)))]))

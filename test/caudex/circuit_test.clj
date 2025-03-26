@@ -48,9 +48,12 @@
              sorted-ops))))
   (testing "Pattern and pred clauses"
     (let [q '[:find ?a ?c
+              :in $ %
               :where
               [?a :attr-1 ?b]
               [?b :attr-2 ?c]
               [?c :attr-3 ?d]
-              [(> ?d 10)]]
+              [(+ ?d 10) ?e]
+              [(> ?e 10)]
+              (rule ?d ?e)]
           circuit (c/build-circuit q)])))
