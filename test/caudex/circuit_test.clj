@@ -21,7 +21,7 @@
       (if (= (count nodes) 1) (first nodes) nodes)))
 
  (deftest test-build-circuit
-  #_(testing "Only pattern clauses"
+  (testing "Only pattern clauses"
       (let [q '[:find ?a ?b
                 :where
                 [?a :attr-1 12]
@@ -32,8 +32,8 @@
         (is (match?
              [[{:type :root}]
               (m/in-any-order
-               [{:type :map :output '[[?b ?a]]}
-                {:type :map :output '[[?a]]}])
+               [{:type :filter :output '[[?b ?a]]}
+                {:type :filter :output '[[?a]]}])
               (m/in-any-order
                [{:type :add :inputs '[[[?b ?a]] [[?b ?a]]] :output '[[?b ?a]]}
                 {:type :add :inputs '[[[?a]] [[?a]]] :output '[[?a]]}
@@ -51,9 +51,18 @@
               :in $ %
               :where
               [?a :attr-1 ?b]
-              [?b :attr-2 ?c]
-              [?c :attr-3 ?d]
-              [(+ ?d 10) ?e]
-              [(> ?e 10)]
-              (rule ?d ?e)]
-          circuit (c/build-circuit q)])))
+              [(+ ?b 10) ?c]
+              [(> ?c 10)]]
+          circuit (c/build-circuit q)
+          sorted-ops (mapv #(mapv utils/op->edn %)
+                           (utils/topsort-circuit circuit :stratify? true))]
+      (is (match?
+           [[{:type :root}]
+            [{:type :filter :inputs [] :output '[[?a ?b]]}]
+            [{:type :map
+              :inputs '[[[?a ?b]]]
+              :output '[[?a ?b] [?c]]}]
+            [{:type :filter
+              :inputs '[[[?a ?b] [?c]]]
+              :output '[[?a ?b] [?c]]}]]
+           sorted-ops)))))

@@ -93,7 +93,14 @@
   (-get-input-types [_] [])
   (-get-output-type [_] []))
 
-(defrecord MapOperator [id input-type output-type filters projections]
+(defrecord FilterOperator [id input-type output-type filters projections]
+  Operator
+  (-get-id [_] id)
+  (-get-op-type [_] :filter)
+  (-get-input-types [_] (if (some? input-type) [input-type] []))
+  (-get-output-type [_] output-type))
+
+(defrecord MapOperator [id input-type output-type mapping-fn indices]
   Operator
   (-get-id [_] id)
   (-get-op-type [_] :map)
@@ -131,7 +138,7 @@
 (extend-protocol Datafiable
   RootOperator
   (datafy [this] (datafy-op this))
-  MapOperator
+  FilterOperator
   (datafy [this] (datafy-op this))
   NegOperator
   (datafy [this] (datafy-op this))

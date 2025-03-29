@@ -137,7 +137,20 @@
                                        [(< ?b ?c)])])
           edges-2 (mapv #(vector % (uber/attr graph % :required?))
                         (uber/in-edges graph (some #(when (uber/ubergraph? %) %)
-                                                   (uber/nodes graph))))]
+                                                   (uber/nodes graph))))
+          {:keys [graph]} (q/analyze
+                           '[:find ?a ?c
+                             :in $ %
+                             :where
+                             [?a :attr "asd"]
+                             [?a :attr-2 ?c]
+                             (rule ?c)]
+                           '[[(rule ?b)
+                              [(< ?b 10)]]])
+          edges-3 (mapv #(vector % (uber/attr graph % :required?))
+                        (uber/in-edges graph
+                                       (some #(when (= 'rule (uber/attr graph % :fn)) %)
+                                             (uber/nodes graph))))]
       (is (match?
            (m/in-any-order
             [[{:src '?a} nil] [{:src '?b} true]])
@@ -145,4 +158,5 @@
       (is (match?
            (m/in-any-order
             [[{:src '?a} nil] [{:src '?b} true]])
-           edges-2)))))
+           edges-2))
+      (is (match? [[{:src '?c} true]] edges-3)))))

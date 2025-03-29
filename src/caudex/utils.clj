@@ -64,7 +64,7 @@
                                     :label (str (get-in (:attrs g) [(:id %) :label]))))
                     (uber/edges g))}
       :flags #{:directed} :default-attributes {:edge {:label "label"}}))))
-#trace
+
  (defn topsort
    [circuit & {:keys [start visited visited-check-fn]
                :or {start (get-root-node circuit) visited #{}}}]
@@ -129,5 +129,9 @@
    query-graph
    (assoc opts :visited-check-fn
           (fn [dep node]
-            (or (not (symbol? dep))
-                (contains? #{:rule :or-join :not-join} (uber/attr query-graph node :type)))))))
+            (if (contains? #{:rule :or-join :not-join}
+                           (uber/attr query-graph node :type))
+              (not (uber/attr query-graph
+                              (uber/find-edge query-graph [dep node])
+                                     :required?))
+              (not (symbol? dep)))))))
