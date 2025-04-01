@@ -9,12 +9,10 @@
 
 (declare build-circuit*)
 #trace
-(defn- find-val-idx [op var]
-  (some (fn [[type-idx type]]
-          (let [idx (.indexOf type var)]
-            (when (not= -1 idx)
-              (->ValIndex type-idx idx))))
-        (map-indexed vector (-to-vector (-get-output-type op)))))
+ (defn- find-val-idx [op var]
+   (let [idx (.indexOf (-to-vector (-get-output-type op)) var)]
+     (when (not= -1 idx)
+       (->ValIndex idx))))
 
 (defn- find-starting-node
   ([graph]
@@ -83,15 +81,15 @@
                                       (let [attr (uber/attr query-graph edge :label)
                                             conds
                                             (cond-> []
-                                              (not (symbol? src)) (conj [= (->ValIndex 0 0) src])
-                                              (not (symbol? attr)) (conj [= (->ValIndex 0 1) attr])
-                                              (not (symbol? dest)) (conj [= (->ValIndex 0 2) dest]))
+                                              (not (symbol? src)) (conj [= (->ValIndex 0) src])
+                                              (not (symbol? attr)) (conj [= (->ValIndex 1) attr])
+                                              (not (symbol? dest)) (conj [= (->ValIndex 2) dest]))
                                             selections
                                             (cond-> []
-                                              (symbol? src) (conj (->ValIndex 0 0))
-                                              (symbol? attr) (conj (->ValIndex 0 1))
-                                              (symbol? dest) (conj (->ValIndex 0 2)))
-                                            output-type [(filterv symbol? [src attr dest])]
+                                              (symbol? src) (conj (->ValIndex 0))
+                                              (symbol? attr) (conj (->ValIndex 1))
+                                              (symbol? dest) (conj (->ValIndex 2)))
+                                            output-type (filterv symbol? [src attr dest])
                                             op (->FilterOperator
                                                 (gensym "datom-") nil output-type conds selections)
                                            ;; Join with previously processed op that has a common var
@@ -162,7 +160,7 @@
                                         (-get-output-type last-op)
                                         (conj (-> last-op
                                                   (-get-output-type) (-to-vector))
-                                              [(:dest binding)])
+                                              (:dest binding))
                                         (uber/attr query-graph node :fn)
                                         indices)]
                   [(uber/add-directed-edges circuit [last-op op]) op])
@@ -196,14 +194,13 @@
           _ (when (> (count components) 1)
               (throw (Exception. "Cannot have disjoint query components")))
           root (->RootOperator (gensym "root-"))
-          op-type (mapv vector inputs)
           input-op (if input-op
                      (->FilterOperator
-                      (gensym "input-") (-get-output-type input-op) op-type []
+                      (gensym "input-") (-get-output-type input-op) inputs []
                       (mapv #(find-val-idx input-op %) inputs))
                      (->FilterOperator
-                      (gensym "input-") nil op-type [[= ::query-inputs (->ValIndex 0 0)]]
-                      (mapv #(->ValIndex 0 %) (range (count inputs)))))
+                      (gensym "input-") nil inputs [[= ::query-inputs (->ValIndex 0)]]
+                      (mapv #(->ValIndex %) (range (count inputs)))))
           [circuit last-op]
           (-> (uber/ubergraph false false)
               (uber/add-nodes root)
@@ -221,7 +218,7 @@
           projection (->FilterOperator
                       (gensym "proj-")
                       (-get-output-type last-op)
-                      (mapv vector proj-vars)
+                      proj-vars
                       []
                       (mapv #(find-val-idx last-op %) proj-vars))]
       (uber/add-directed-edges circuit [last-op projection]))))
