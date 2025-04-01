@@ -83,9 +83,9 @@
                                       (let [attr (uber/attr query-graph edge :label)
                                             conds
                                             (cond-> []
-                                              (not (symbol? src)) (conj [= src (->ValIndex 0 0)])
-                                              (not (symbol? attr)) (conj [= attr (->ValIndex 0 1)])
-                                              (not (symbol? dest)) (conj [= dest (->ValIndex 0 2)]))
+                                              (not (symbol? src)) (conj [= (->ValIndex 0 0) src])
+                                              (not (symbol? attr)) (conj [= (->ValIndex 0 1) attr])
+                                              (not (symbol? dest)) (conj [= (->ValIndex 0 2) dest]))
                                             selections
                                             (cond-> []
                                               (symbol? src) (conj (->ValIndex 0 0))
@@ -120,7 +120,9 @@
            (recur processed queue ret)
            (if (empty? (flatten (-to-vector (-get-output-type input-op))))
              [ret (last (utils/topsort-circuit ret))]
-             (join-ops ret (last processed) input-op)))))))
+             (if (seq processed)
+               (join-ops ret (last processed) input-op)
+               [(uber/add-nodes ret input-op) input-op])))))))
 #trace
  (defn- process-non-pattern-clauses [circuit input-op query-graph rules]
    (let [nodes (filterv
@@ -186,28 +188,43 @@
                    input-ops)
                   circuit)]))
 #trace
- (defn- build-circuit* [inputs query-graph rules]
-   (let [components (alg/connected-components query-graph)
-         _ (when (> (count components) 1)
-             (throw (Exception. "Cannot have disjoint query components")))
-         root (->RootOperator (gensym "root-"))
-         input-op (->FilterOperator
-                   (gensym "input-") nil [inputs] [[= ::query-inputs (->ValIndex 0 0)]]
-                   (mapv #(->ValIndex 0 %) (range (count inputs))))
-         [circuit last-op]
-         (-> (uber/ubergraph false false)
-             (uber/add-nodes root)
-             (join-pattern-clauses query-graph root input-op))]
-     (first (process-non-pattern-clauses circuit last-op query-graph rules))))
+ (defn- build-circuit*
+   ([inputs query-graph rules]
+    (build-circuit* inputs query-graph rules nil))
+   ([inputs query-graph rules input-op]
+    (let [components (alg/connected-components query-graph)
+          _ (when (> (count components) 1)
+              (throw (Exception. "Cannot have disjoint query components")))
+          root (->RootOperator (gensym "root-"))
+          op-type (mapv vector inputs)
+          input-op (if input-op
+                     (->FilterOperator
+                      (gensym "input-") (-get-output-type input-op) op-type []
+                      (mapv #(find-val-idx input-op %) inputs))
+                     (->FilterOperator
+                      (gensym "input-") nil op-type [[= ::query-inputs (->ValIndex 0 0)]]
+                      (mapv #(->ValIndex 0 %) (range (count inputs)))))
+          [circuit last-op]
+          (-> (uber/ubergraph false false)
+              (uber/add-nodes root)
+              (join-pattern-clauses query-graph root input-op))]
+      (process-non-pattern-clauses circuit last-op query-graph rules))))
 
-
-(defn build-circuit
-  ([query]
-   (build-circuit query []))
-  ([query rules]
-   (let [{:keys [inputs projections rules graph]} (qa/analyze query rules)
-         circuit (build-circuit* inputs graph rules)]
-     circuit)))
+#trace
+ (defn build-circuit
+   ([query]
+    (build-circuit query []))
+   ([query rules]
+    (let [{:keys [inputs projections rules graph]} (qa/analyze query rules)
+          [circuit last-op] (build-circuit* inputs graph rules)
+          proj-vars (into [] (comp (map :symbol) (filter some?)) projections)
+          projection (->FilterOperator
+                      (gensym "proj-")
+                      (-get-output-type last-op)
+                      (mapv vector proj-vars)
+                      []
+                      (mapv #(find-val-idx last-op %) proj-vars))]
+      (uber/add-directed-edges circuit [last-op projection]))))
 
 
 (comment

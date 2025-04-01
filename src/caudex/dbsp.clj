@@ -7,7 +7,7 @@
   e.g. join(input-1: [?e :attr ?v] input-2: [?v :attr2 23]) -> [?e ?v ?x]
   where join conditions are [= {:input-idx 0 :val-idx 2} {:input-idx 1 :val-idx 0}]
   and [= {:input-idx 1 :val-idx 2} 23]"
-  (:require [clojure.core.protocols :refer [Datafiable]]))
+  (:require [clojure.core.protocols :refer [datafy Datafiable]]))
 
 (defprotocol Operator
   (-get-id [this])
@@ -28,28 +28,32 @@
   (-get-joined-type [this new-type])
   (-get-join-constraints [this new-type]))
 
-;; Some constraint b/w two zset types
+;; Some constraint b/w a sequence of datums which could be zset rows or constants
 (defprotocol Constraint
   (-get-pred [this])
-  (-get-val-index-1 [this])
-  (-get-val-index-2 [this])
-  (-satisfies? [this val-1 val-2]))
+  (-get-args [this])
+  (-satisfies? [this rows]))
 
-;; Describes an value derived from an product type i.e. result of a join
+;; Describes an value derived from an product type e.g. second value of the third tuple
+;; -> [1 2]
 (defrecord ValIndex [outer-idx inner-idx])
 
 ;; Assumes constraint is defined as [pred-fn val-index-1 val-index-2]
 (extend-type clojure.lang.PersistentVector
   Constraint
   (-get-pred [this] (first this))
-  (-get-val-index-1 [this] (second this))
-  (-get-val-index-2 [this] (nth this 2))
-  (-satisfies? [this val-1 val-2]
-    ((-get-pred this)
-     (get-in val-1 [(:outer-idx (-get-val-index-1 this)) (:inner-idx (-get-val-index-1 this))])
-     (get-in val-2 [(:outer-idx (-get-val-index-2 this)) (:inner-idx (-get-val-index-2 this))]))))
+  (-get-args [this] (subvec this 1))
+  (-satisfies? [this row]
+    (apply
+     (-get-pred this)
+     (mapv
+      (fn [idx|const]
+        (if (record? idx|const)
+          (get-in row [(:outer-idx idx|const) (:inner-idx idx|const)])
+          idx|const))
+      (-get-args this)))))
 
-
+#trace
 (defn- find-constraints [zset-type-1 zset-type-2]
   (let [collect-pos #(transduce
                       (comp
@@ -58,7 +62,7 @@
                               (map-indexed
                                (fn [idx-2 el]
                                  (when (symbol? el)
-                                   [el [idx-1 idx-2]]))
+                                   [el [(+ %2 idx-1) idx-2]]))
                                data)))
                        cat
                        (filter (fn [[el]]
@@ -67,9 +71,9 @@
                        (fn [indices [el idx]]
                          (update indices el conj idx)))
                       {}
-                      %)
-        indices-1 (collect-pos (-to-vector zset-type-1))
-        indices-2 (collect-pos (-to-vector zset-type-2))]
+                      %1)
+        indices-1 (collect-pos (-to-vector zset-type-1) 0)
+        indices-2 (collect-pos (-to-vector zset-type-2) (count (-to-vector zset-type-1)))]
     (reduce
      (fn [constraints [var indices]]
        (into constraints
@@ -100,7 +104,7 @@
   (-get-input-types [_] (if (some? input-type) [input-type] []))
   (-get-output-type [_] output-type))
 
-(defrecord MapOperator [id input-type output-type mapping-fn indices]
+(defrecord MapOperator [id input-type output-type mapping-fn args]
   Operator
   (-get-id [_] id)
   (-get-op-type [_] :map)
@@ -121,6 +125,7 @@
   (-get-input-types [_] [input-type])
   (-get-output-type [_] input-type))
 
+;; Represents a cartesian product of two zset types. May be conditional or unconditional
 (defrecord JoinOperator [id input-type-1 input-type-2 join-conds]
   Operator
   (-get-id [_] id)
@@ -139,7 +144,15 @@
   RootOperator
   (datafy [this] (datafy-op this))
   FilterOperator
-  (datafy [this] (datafy-op this))
+  (datafy [this]
+    (assoc (datafy-op this)
+           :filters (mapv #(mapv (fn [v] (datafy v)) %) (:filters this))
+           :projections (mapv datafy (:projections this))))
+  MapOperator
+  (datafy [this]
+    (assoc (datafy-op this)
+           :mapping-fn (:mapping-fn this)
+           :args (mapv datafy (:args this))))
   NegOperator
   (datafy [this] (datafy-op this))
   DelayOperator
@@ -147,4 +160,6 @@
   JoinOperator
   (datafy [this] (datafy-op this))
   AddOperator
-  (datafy [this] (datafy-op this)))
+  (datafy [this] (datafy-op this))
+  ValIndex
+  (datafy [this] [(:outer-idx this) (:inner-idx this)]))
