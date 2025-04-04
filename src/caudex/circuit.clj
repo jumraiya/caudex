@@ -91,7 +91,7 @@
                                               (symbol? dest) (conj (->ValIndex 2)))
                                             output-type (filterv symbol? [src attr dest])
                                             op (->FilterOperator
-                                                (gensym "datom-") nil output-type conds selections)
+                                                (gensym "datom-") [src attr dest] conds selections)
                                            ;; Join with previously processed op that has a common var
                                             prev-op
                                             (some #(let [vars (-get-output-type %)]
@@ -149,7 +149,6 @@
             :pred (let [op (->FilterOperator
                             (gensym "pred-")
                             (-get-output-type last-op)
-                            (-get-output-type last-op)
                             [(into [(uber/attr query-graph node :fn)]
                                    indices)]
                             nil)]
@@ -196,10 +195,10 @@
           root (->RootOperator (gensym "root-"))
           input-op (if input-op
                      (->FilterOperator
-                      (gensym "input-") (-get-output-type input-op) inputs []
+                      (gensym "input-") (-get-output-type input-op) []
                       (mapv #(find-val-idx input-op %) inputs))
                      (->FilterOperator
-                      (gensym "input-") nil inputs [[= ::query-inputs (->ValIndex 0)]]
+                      (gensym "input-") inputs [[= ::query-inputs (->ValIndex 0)]]
                       (mapv #(->ValIndex %) (range (count inputs)))))
           [circuit last-op]
           (-> (uber/ubergraph false false)
@@ -218,7 +217,6 @@
           projection (->FilterOperator
                       (gensym "proj-")
                       (-get-output-type last-op)
-                      proj-vars
                       []
                       (mapv #(find-val-idx last-op %) proj-vars))]
       (uber/add-directed-edges circuit [last-op projection]))))

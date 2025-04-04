@@ -83,6 +83,11 @@
   (-get-join-constraints [this new-type]
     (find-constraints this new-type)))
 
+;; All operators are either unary or binary and always have a single output
+;; Although the output could be sent to multiple operators.
+
+;; Entry point for transaction data into a circuit
+;; The operator is expected to take tx-data and produce a zset from it.
 (defrecord RootOperator [id]
   Operator
   (-get-id [_] id)
@@ -90,13 +95,22 @@
   (-get-input-types [_] [])
   (-get-output-type [_] []))
 
-(defrecord FilterOperator [id input-type output-type filters projections]
+;; Multi-use operator, could be used for datom ingress, projections or predicates
+;; Takes zero or more filters in the form of [predicate arg+], where arg could be a value
+;; or an index (as a ValIndex record) into the input zset row.
+;; Takes optional sequence of projections in the form of ValIndexes
+(defrecord FilterOperator [id input-type filters projections]
   Operator
   (-get-id [_] id)
   (-get-op-type [_] :filter)
   (-get-input-types [_] (if (some? input-type) [input-type] []))
-  (-get-output-type [_] output-type))
+  (-get-output-type [_]
+    (if (empty? projections)
+      input-type
+      (mapv #(nth (-to-vector input-type) (:idx %)) projections))))
 
+;; Used for transforming a zset entry into something else.
+;; args are sequence of either values or ValIndexes
 (defrecord MapOperator [id input-type output-type mapping-fn args]
   Operator
   (-get-id [_] id)

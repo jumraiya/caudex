@@ -7,8 +7,8 @@
 
 (defn- tx-data->zset [txs]
   (into {}
-        (map (fn [[e a v tx add?]]
-               [[e a v tx] add?]))
+        (map (fn [[e a v _tx add?]]
+               [[e a v] add?]))
         txs))
 
 (defn- is-idx? [v]
@@ -65,7 +65,7 @@
                                                 %))
                                         (:args op))
                              res (apply (:mapping-fn op) args)]
-                         [(conj row [res]) add?])))
+                         [(conj row res) add?])))
                 (first zsets))
      :neg (update-vals not (first zsets))
      :delay (first zsets)
