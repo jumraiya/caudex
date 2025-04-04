@@ -48,7 +48,7 @@
      (mapv
       (fn [idx|const]
         (if (record? idx|const)
-          (get-in row [(:outer-idx idx|const) (:inner-idx idx|const)])
+          (get row (:idx idx|const))
           idx|const))
       (-get-args this)))))
 
@@ -156,3 +156,26 @@
   (datafy [this] (datafy-op this))
   ValIndex
   (datafy [this] [:idx (:idx this)]))
+
+(comment
+  (let [arr [4 6 7 1 3]
+        next-idx (fn [pred idx arr]
+                   (loop [i idx]
+                     (if (and (< i (count arr))
+                              (pred (nth arr i)))
+                       i
+                       (when (< i (count arr))
+                         (recur (inc i))))))
+        next-odd (partial next-idx odd?)
+        next-even (partial next-idx even?)]
+    (loop [o-idx 0 e-idx 0 odd-used #{} even-used #{}]
+      (when (and o-idx e-idx (not= o-idx e-idx))
+        (prn (nth arr o-idx) (nth arr e-idx)))
+      (when (and (< o-idx (count arr)) (< e-idx (count arr)))
+        (let [odd-used (conj odd-used o-idx)
+              even-used (conj even-used e-idx)]
+          (cond
+            (= o-idx e-idx) (recur (next-odd o-idx) e-idx odd-used even-used)
+            (> o-idx e-idx) (cond
+                              (> (- o-idx e-idx) 1)
+                              (recur (next-odd o-idx) e-idx odd-used even-used))))))))

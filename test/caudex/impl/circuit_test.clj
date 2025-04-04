@@ -14,5 +14,8 @@
         circuit (impl/reify-circuit (c/build-circuit q))
         tx-data [[1 :attr-1 12 123 true]
                  [2 :attr-2 1 123 true]]
-        circuit (impl/step circuit tx-data)]
-    (impl/prn-circuit circuit)))
+        circuit (impl/step circuit tx-data)
+        output (impl/get-output-stream circuit)]
+    (is (match?
+         [{[1 2] true}]
+         output))))

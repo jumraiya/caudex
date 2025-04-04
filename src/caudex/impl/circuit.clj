@@ -7,8 +7,8 @@
 
 (defn- tx-data->zset [txs]
   (into {}
-        (map (fn [[e a v _ add?]]
-               [[[e a v]] add?]))
+        (map (fn [[e a v tx add?]]
+               [[e a v tx] add?]))
         txs))
 
 (defn- is-idx? [v]
@@ -18,7 +18,9 @@
  (defn reify-circuit
    "Constructs a map representing a circuit along with it's step order"
    [circuit]
-   (let [root (some #(when (= :root (dbsp/-get-op-type %)) %) (uber/nodes circuit))]
+   (let [order (utils/topsort-circuit circuit)
+         root (some #(when (= :root (dbsp/-get-op-type %)) %) (uber/nodes circuit))
+         last-op (last order)]
      (reduce
       (fn [g [idx {:keys [src dest] :as e}]]
         (let [arg-idx (uber/attr circuit e :arg)]
@@ -30,8 +32,11 @@
                             (update-in [(dbsp/-get-id src) :outputs] #(conj (or % []) idx))
                             (update-in [(dbsp/-get-id dest) :inputs]
                                        #(assoc (or % (sorted-map)) arg-idx idx))))))))
-      {:t 0 :streams {-1 []} :op-stream-map {(dbsp/-get-id root) {:inputs (sorted-map 0 -1) :outputs []}}
-       :order (utils/topsort-circuit circuit)}
+      {:t 0
+       :streams {-1 [] -2 []}
+       :op-stream-map {(dbsp/-get-id root) {:inputs (sorted-map 0 -1) :outputs []}
+                       (dbsp/-get-id last-op) {:outputs [-2]}}
+       :order order}
       (eduction
        (map-indexed vector)
        (uber/edges circuit)))))
@@ -48,10 +53,7 @@
                                (:filters op))))
                     (map (fn [[k v]]
                            (if (seq (:projections op))
-                             [(mapv #(-> k
-                                         (nth (:outer-idx %))
-                                         (nth (:inner-idx %)))
-                                    (:projections op))
+                             [(mapv #(nth k (:idx %)) (:projections op))
                               v]
                              [k v]))))
                    (first zsets))
@@ -59,9 +61,7 @@
                 (map (fn [[row add?]]
                        (let [args (into []
                                         (map #(if (is-idx? %)
-                                                (-> row
-                                                    (nth (:outer-idx %))
-                                                    (nth (:inner-idx %)))
+                                                (nth row (:idx %))
                                                 %))
                                         (:args op))
                              res (apply (:mapping-fn op) args)]
@@ -75,7 +75,7 @@
                                  (every?
                                   #(dbsp/-satisfies? % (into (key row-1) (key row-2)))
                                   (:join-conds op)))]
-                   [[(into (key row-1) (key row-2))] (and (val row-1) (val row-2))]))
+                   [(into (key row-1) (key row-2)) (and (val row-1) (val row-2))]))
      :add (reduce
            (fn [set-1 row]
              (if (contains? set-1 (key row))
@@ -105,6 +105,9 @@
       (update data :t inc)
       (:order data))))
 
+(defn get-output-stream [circuit]
+  (get-in circuit [:streams -2]))
+
 (defn prn-circuit [circuit]
   (doseq [t (range (:t circuit))]
     (prn "t: " t)
@@ -113,4 +116,7 @@
            " inputs: " (mapv #(nth (get-in circuit [:streams %]) t)
                              (vals (get-in circuit [:op-stream-map (dbsp/-get-id op) :inputs])))
            " outputs: " (when-let [idx (first (get-in circuit [:op-stream-map (dbsp/-get-id op) :outputs]))]
-                         (nth (get-in circuit [:streams idx]) t))))))
+                          (nth (get-in circuit [:streams idx]) t))))))
+
+;(prn-circuit user/c)
+
