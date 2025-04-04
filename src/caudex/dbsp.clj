@@ -34,9 +34,8 @@
   (-get-args [this])
   (-satisfies? [this rows]))
 
-;; Describes an value derived from an product type e.g. second value of the third tuple
-;; -> [1 2]
-(defrecord ValIndex [outer-idx inner-idx])
+;; Describes an value derived from an product type
+(defrecord ValIndex [idx])
 
 ;; Assumes constraint is defined as [pred-fn val-index-1 val-index-2]
 (extend-type clojure.lang.PersistentVector
@@ -49,39 +48,33 @@
      (mapv
       (fn [idx|const]
         (if (record? idx|const)
-          (get-in row [(:outer-idx idx|const) (:inner-idx idx|const)])
+          (get row (:idx idx|const))
           idx|const))
       (-get-args this)))))
 
 #trace
-(defn- find-constraints [zset-type-1 zset-type-2]
-  (let [collect-pos #(transduce
-                      (comp
-                       (map-indexed vector)
-                       (map (fn [[idx-1 data]]
-                              (map-indexed
-                               (fn [idx-2 el]
-                                 (when (symbol? el)
-                                   [el [(+ %2 idx-1) idx-2]]))
-                               data)))
-                       cat
-                       (filter (fn [[el]]
-                                 (symbol? el))))
-                      (completing
-                       (fn [indices [el idx]]
-                         (update indices el conj idx)))
-                      {}
-                      %1)
-        indices-1 (collect-pos (-to-vector zset-type-1) 0)
-        indices-2 (collect-pos (-to-vector zset-type-2) (count (-to-vector zset-type-1)))]
-    (reduce
-     (fn [constraints [var indices]]
-       (into constraints
-             (for [idx-1 indices idx-2 (get indices-2 var)]
-               [= (->ValIndex (first idx-1) (second idx-1))
-                (->ValIndex (first idx-2) (second idx-2))])))
-     []
-     indices-1)))
+ (defn- find-constraints [zset-type-1 zset-type-2]
+   (let [collect-pos #(transduce
+                       (comp
+                        (filter symbol?)
+                        (map-indexed vector)
+                        (map (fn [[idx-1 el]]
+                               [el (+ %2 idx-1)])))
+                       (completing
+                        (fn [indices [el idx]]
+                          (update indices el conj idx)))
+                       {}
+                       %1)
+         indices-1 (collect-pos (-to-vector zset-type-1) 0)
+         indices-2 (collect-pos (-to-vector zset-type-2) (count (-to-vector zset-type-1)))]
+     (reduce
+      (fn [constraints [var indices]]
+        (into constraints
+              (for [idx-1 indices idx-2 (get indices-2 var)]
+                [= (->ValIndex idx-1)
+                 (->ValIndex idx-2)])))
+      []
+      indices-1)))
 
 (extend-type clojure.lang.PersistentVector
   ZSetType
@@ -90,6 +83,11 @@
   (-get-join-constraints [this new-type]
     (find-constraints this new-type)))
 
+;; All operators are either unary or binary and always have a single output
+;; Although the output could be sent to multiple operators.
+
+;; Entry point for transaction data into a circuit
+;; The operator is expected to take tx-data and produce a zset from it.
 (defrecord RootOperator [id]
   Operator
   (-get-id [_] id)
@@ -97,13 +95,22 @@
   (-get-input-types [_] [])
   (-get-output-type [_] []))
 
-(defrecord FilterOperator [id input-type output-type filters projections]
+;; Multi-use operator, could be used for datom ingress, projections or predicates
+;; Takes zero or more filters in the form of [predicate arg+], where arg could be a value
+;; or an index (as a ValIndex record) into the input zset row.
+;; Takes optional sequence of projections in the form of ValIndexes
+(defrecord FilterOperator [id input-type filters projections]
   Operator
   (-get-id [_] id)
   (-get-op-type [_] :filter)
   (-get-input-types [_] (if (some? input-type) [input-type] []))
-  (-get-output-type [_] output-type))
+  (-get-output-type [_]
+    (if (empty? projections)
+      input-type
+      (mapv #(nth (-to-vector input-type) (:idx %)) projections))))
 
+;; Used for transforming a zset entry into something else.
+;; args are sequence of either values or ValIndexes
 (defrecord MapOperator [id input-type output-type mapping-fn args]
   Operator
   (-get-id [_] id)
@@ -162,4 +169,27 @@
   AddOperator
   (datafy [this] (datafy-op this))
   ValIndex
-  (datafy [this] [(:outer-idx this) (:inner-idx this)]))
+  (datafy [this] [:idx (:idx this)]))
+
+(comment
+  (let [arr [4 6 7 1 3]
+        next-idx (fn [pred idx arr]
+                   (loop [i idx]
+                     (if (and (< i (count arr))
+                              (pred (nth arr i)))
+                       i
+                       (when (< i (count arr))
+                         (recur (inc i))))))
+        next-odd (partial next-idx odd?)
+        next-even (partial next-idx even?)]
+    (loop [o-idx 0 e-idx 0 odd-used #{} even-used #{}]
+      (when (and o-idx e-idx (not= o-idx e-idx))
+        (prn (nth arr o-idx) (nth arr e-idx)))
+      (when (and (< o-idx (count arr)) (< e-idx (count arr)))
+        (let [odd-used (conj odd-used o-idx)
+              even-used (conj even-used e-idx)]
+          (cond
+            (= o-idx e-idx) (recur (next-odd o-idx) e-idx odd-used even-used)
+            (> o-idx e-idx) (cond
+                              (> (- o-idx e-idx) 1)
+                              (recur (next-odd o-idx) e-idx odd-used even-used))))))))
