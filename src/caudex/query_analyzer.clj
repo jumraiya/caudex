@@ -16,7 +16,9 @@
     datascript.parser.Variable
     (:symbol v)
     datascript.parser.Constant
-    (:value v)))
+    (:value v)
+    datascript.parser.Placeholder
+    '_))
 
 (defn- is-var-required? [graph var]
   (if (or (some #(when (= :binding (uber/attr graph % :label)) %)

@@ -79,7 +79,7 @@
      :add (reduce
            (fn [set-1 row]
              (if (contains? set-1 (key row))
-               (if (not= (get set-1 row) (val row))
+               (if (not= (get set-1 (key row)) (val row))
                  (dissoc set-1 (key row))
                  set-1)
                (conj set-1 row)))
