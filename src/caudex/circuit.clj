@@ -39,15 +39,7 @@
             nodes)
       (first pattern-nodes)))))
 
-(defn- merge-sub-circuit [circuit root sub-circuit]
-  (let [sub-circuit-root (get-root sub-circuit)
-        sub-circuit (uber/remove-nodes sub-circuit sub-circuit-root)]
-    (reduce
-     #(if (= :root (-get-op-type (:src %2)))
-        (uber/add-directed-edges %1 [root (:dest %2)])
-        (uber/add-directed-edges %1 [(:src %2) (:dest %2)]))
-     circuit
-     (uber/edges sub-circuit))))
+
 
 
 
@@ -86,6 +78,28 @@
          (add-op-inputs final-add join-1 join-2))
      final-add]))
 
+(defn- merge-sub-circuit [circuit sub-circuit args]
+  (let [root (get-root circuit)
+        sub-circuit-last-op (last (utils/topsort-circuit sub-circuit))
+        last-op (last (utils/topsort-circuit circuit))
+        projection (->FilterOperator
+                    (gensym "proj-")
+                    (-get-output-type sub-circuit-last-op)
+                    nil
+                    (mapv #(find-val-idx sub-circuit-last-op (first %)) args))
+        sub-circuit (uber/add-directed-edges sub-circuit [sub-circuit-last-op projection])
+        [sub-circuit sub-circuit-last-op] (join-ops sub-circuit projection last-op)
+        sub-circuit-root (get-root sub-circuit)]
+    [(uber/remove-nodes
+      (reduce
+       #(if (= :root (-get-op-type (:src %2)))
+          (uber/add-directed-edges %1 [root (:dest %2)])
+          (uber/add-directed-edges %1 [(:src %2) (:dest %2)]))
+       circuit
+       (uber/edges sub-circuit))
+      sub-circuit-root)
+     sub-circuit-last-op]))
+
 (defn- join-with-inputs [circuit op input-op-map]
   (let [o-type (-> op -get-output-type -to-vector set)]
     (reduce
@@ -104,7 +118,7 @@
          pattern-edges #(filterv
                          (fn [e] (= :pattern (uber/attr query-graph e :clause-type)))
                          (uber/out-edges query-graph %))
-         sym? #(and (symbol? %) (not= '_ %))]
+         var? #(and (symbol? %) (not= '_ %))]
      (loop [processed [] queue (pattern-edges start) ret circuit]
        (let [[ret ops nodes edges last-op]
              (reduce
@@ -112,15 +126,15 @@
                 (let [attr (uber/attr query-graph edge :label)
                       conds
                       (cond-> []
-                        (not (sym? src)) (conj [= (->ValIndex 0) src])
-                        (not (sym? attr)) (conj [= (->ValIndex 1) attr])
-                        (not (sym? dest)) (conj [= (->ValIndex 2) dest]))
+                        (not (symbol? src)) (conj [= (->ValIndex 0) src])
+                        (not (symbol? attr)) (conj [= (->ValIndex 1) attr])
+                        (not (symbol? dest)) (conj [= (->ValIndex 2) dest]))
                       selections
                       (cond-> []
-                        (sym? src) (conj (->ValIndex 0))
-                        (sym? attr) (conj (->ValIndex 1))
-                        (sym? dest) (conj (->ValIndex 2)))
-                      output-type (filterv sym? [src attr dest])
+                        (var? src) (conj (->ValIndex 0))
+                        (var? attr) (conj (->ValIndex 1))
+                        (var? dest) (conj (->ValIndex 2)))
+                      output-type (filterv var? [src attr dest])
                       op (->FilterOperator
                           (gensym "datom-") [src attr dest] conds selections)
                       ;; Join with previously processed op that has a common var
@@ -152,6 +166,70 @@
          (if (seq queue)
            (recur processed queue ret)
            [ret last-op])))))
+
+(defn- process-fn|pred [circuit type args last-op query-graph node input-op-map]
+  (let [o-type (-> last-op -get-output-type -to-vector set)
+        var-args (into []
+                       (comp
+                        (map first)
+                        (filter symbol?)
+                        (remove #(contains? o-type %))
+                        (filter #(contains? input-op-map %)))
+                       args)
+        [circuit last-op] (if (contains? #{:pred :fn} (uber/attr query-graph node :type))
+                            (reduce
+                             #(join-ops (first %1) (second %1) (get input-op-map %2))
+                             [circuit last-op]
+                             var-args)
+                            [circuit last-op])
+        indices
+        (mapv
+         (fn [[arg _ required?]]
+           (let [idx (if (symbol? arg)
+                       (find-val-idx last-op arg)
+                       arg)]
+             (if (and (nil? idx) (symbol? arg) required?)
+               (throw (Exception. (str "Could not find " arg " in input op")))
+               idx)))
+         args)]
+   (case type
+     :pred (let [op (->FilterOperator
+                     (gensym "pred-")
+                     (-get-output-type last-op)
+                     [(into [(uber/attr query-graph node :fn)]
+                            indices)]
+                     nil)]
+             [(uber/add-directed-edges circuit [last-op op]) op])
+     :fn (let [binding (some #(when (= :binding (uber/attr query-graph % :label)) %)
+                             (uber/out-edges query-graph node))
+               op (->MapOperator (gensym "fn-")
+                                 (-get-output-type last-op)
+                                 (conj (-> last-op
+                                           (-get-output-type) (-to-vector))
+                                       (:dest binding))
+                                 (uber/attr query-graph node :fn)
+                                 indices)]
+           [(uber/add-directed-edges circuit [last-op op]) op]))))
+#trace
+ (defn- mk-input-ops [circuit source inputs input-op-map]
+   (reduce
+    (fn [[circuit m] [in _ required?]]
+      (let [idx (or (get input-op-map in) (find-val-idx source in))
+            _ (when (and (nil? idx) required?)
+                (throw (Exception. (str "Could not find input " in))))]
+        (if (some? idx)
+          (if (contains? input-op-map in)
+            [circuit (assoc m in (get input-op-map in))]
+            (let [op (->FilterOperator
+                      (gensym "input-")
+                      (-get-output-type source)
+                      nil
+                      [idx])]
+              [(uber/add-directed-edges circuit [source op]) (assoc m in op)]))
+          [circuit m])))
+    [circuit {}]
+    inputs))
+
 #trace
  (defn- process-non-pattern-clauses
    "Processes non datom clauses, all required inputs are joined into a single operator"
@@ -159,8 +237,7 @@
    (let [nodes (filterv
                 #(contains? #{:or-join :not-join :pred :fn :rule}
                             (uber/attr query-graph % :type))
-                (utils/topsort-query-graph query-graph))
-         root (get-root circuit)]
+                (utils/topsort-query-graph query-graph))]
      (reduce
       (fn [[circuit last-op] node]
         (let [args (sort-by
@@ -168,53 +245,27 @@
                     (into []
                           (comp
                            (filter #(= :arg (first (uber/attr query-graph % :label))))
-                           (map #(vector (:src %) (second (uber/attr query-graph % :label)))))
-                          (uber/in-edges query-graph node)))
-              o-type (-> last-op -get-output-type -to-vector set)
-              [circuit last-op] (reduce
-                                 #(join-ops (first %1) (second %1) (get input-op-map %2))
-                                 [circuit last-op]
-                                 (eduction
-                                  (map first)
-                                  (filter symbol?)
-                                  (remove #(contains? o-type %))
-                                  (filter #(contains? input-op-map %))
-                                  args))
-              indices
-              (mapv
-               (fn [[arg]]
-                 (let [idx (if (symbol? arg)
-                             (find-val-idx last-op arg)
-                             arg)]
-                   (if (nil? idx)
-                     (throw (Exception. (str "Could not find " arg " in input op")))
-                     idx)))
-               args)]
+                           (map #(vector (:src %) (second (uber/attr query-graph % :label)) (uber/attr query-graph % :required?))))
+                          (uber/in-edges query-graph node)))]
           (case (uber/attr query-graph node :type)
-            :pred (let [op (->FilterOperator
-                            (gensym "pred-")
-                            (-get-output-type last-op)
-                            [(into [(uber/attr query-graph node :fn)]
-                                   indices)]
-                            nil)]
-                    [(uber/add-directed-edges circuit [last-op op]) op])
-            :fn (let [binding (some #(when (= :binding (uber/attr query-graph % :label)) %)
-                                    (uber/out-edges query-graph node))
-                      op (->MapOperator (gensym "fn-")
-                                        (-get-output-type last-op)
-                                        (conj (-> last-op
-                                                  (-get-output-type) (-to-vector))
-                                              (:dest binding))
-                                        (uber/attr query-graph node :fn)
-                                        indices)]
-                  [(uber/add-directed-edges circuit [last-op op]) op])
-            :not-join (let [[sub-circuit last-op]
-                            (build-circuit* (mapv first args) node rules last-op)
-                            neg-op
-                            (->NegOperator (gensym "neg-") (-get-output-type last-op))
-                            sub-circuit
-                            (uber/add-directed-edges sub-circuit [last-op neg-op])]
-                        [(merge-sub-circuit circuit root sub-circuit) neg-op])
+            (:pred :fn)
+            (process-fn|pred circuit (uber/attr query-graph node :type) args last-op query-graph node input-op-map)
+            :not-join (let [[circuit input-ops]
+                            (mk-input-ops circuit last-op args input-op-map)
+                            [sub-circuit] (build-circuit* (mapv first args) node rules input-ops)
+                            [circuit not-join-last-op] (merge-sub-circuit circuit sub-circuit args)
+                            neg-op (->NegOperator (gensym "neg-") (-get-output-type not-join-last-op))
+                            circuit (uber/add-directed-edges circuit [not-join-last-op neg-op])]
+                        (if (some? last-op)
+                          (let [add-op (->AddOperator
+                                        (gensym "add-")
+                                        (-get-output-type last-op))
+                            circuit (uber/add-directed-edges
+                                     circuit
+                                     [neg-op add-op {:arg 0}]
+                                     [last-op add-op {:arg 1}])]
+                           [circuit add-op])
+                          [circuit neg-op]))
 
             [circuit last-op])))
       [circuit input-op]
@@ -234,7 +285,7 @@
           [circuit input-op-map]
           (if (seq inputs)
             (if (map? input-op-map)
-              input-op-map
+              [circuit input-op-map]
               (let [ops
                     (into {}
                           (map
