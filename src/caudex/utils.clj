@@ -65,7 +65,7 @@
                     (uber/edges g))}
       :flags #{:directed} :default-attributes {:edge {:label "label"}}))))
 
- (defn topsort
+ #_(defn topsort
    [circuit & {:keys [start visited visited-check-fn]
                :or {start (get-root-node circuit) visited #{}}}]
    (loop [queue [start] order [] visited visited]
@@ -88,34 +88,98 @@
                 visited)
          (conj order cur)))))
 
- (defn stratified-topsort
+(defn topsort
+  [circuit & {:keys [start visited visited-check-fn]
+              :or {start (get-root-node circuit) visited #{}}}]
+  (let [queue (into [start]
+                    (filter #(and
+                              (not= start %)
+                              (= 0 (uber/in-degree circuit %))))
+                    (uber/nodes circuit))]
+    (loop [queue queue order [] visited visited]
+      (let [[cur & queue] queue
+            visited (conj visited cur)
+            queue (into (vec queue)
+                        (comp (map :dest)
+                              (remove #(contains? visited %))
+                              (remove #(contains? (set queue) %))
+                              (filter #(every?
+                                        (fn [in]
+                                          (if visited-check-fn
+                                            (or (contains? visited (:src in))
+                                                (visited-check-fn (:src in) %))
+                                            (contains? visited (:src in))))
+                                        (uber/in-edges circuit %))))
+                        (uber/out-edges circuit cur))]
+        (if (seq queue)
+          (recur queue
+                 (conj order cur)
+                 visited)
+          (conj order cur))))))
+
+(defn stratified-topsort
   [circuit & {:keys [start visited visited-check-fn] :or {start (get-root-node circuit) visited #{}}}]
-  (loop [queue [start] order [[start]] visited visited]
-    (let [visited (into visited queue)
-          queue (transduce
-                 (comp
-                  (map #(uber/out-edges circuit %))
-                  cat
-                  (map :dest)
-                  (remove #(contains? visited %))
-                  (filter #(every?
-                            (fn [in]
-                              (if visited-check-fn
-                                (or (contains? visited (:src in))
-                                    (visited-check-fn (:src in) %))
-                                (contains? visited (:src in))))
-                            (uber/in-edges circuit %))))
-                 (completing conj)
-                 []
-                 queue)
-          order (if (seq queue)
-                  (conj order queue)
-                  order)]
-      (if (seq queue)
-        (recur queue
-               order
-               visited)
-        order))))
+  (let [queue (into [start]
+                    (filter #(and
+                              (not= start %)
+                              (= 0 (uber/in-degree circuit %))))
+                    (uber/nodes circuit))]
+   (loop [queue queue order [[start]] visited visited]
+     (let [visited (into visited queue)
+           queue (transduce
+                  (comp
+                   (map #(uber/out-edges circuit %))
+                   cat
+                   (map :dest)
+                   (remove #(contains? visited %))
+                   (remove #(contains? (set queue) %))
+                   (filter #(every?
+                             (fn [in]
+                               (if visited-check-fn
+                                 (or (contains? visited (:src in))
+                                     (visited-check-fn (:src in) %))
+                                 (contains? visited (:src in))))
+                             (uber/in-edges circuit %))))
+                  (completing conj)
+                  []
+                  queue)
+           order (if (seq queue)
+                   (conj order queue)
+                   order)]
+       (if (seq queue)
+         (recur queue
+                order
+                visited)
+         order)))))
+
+#_(defn stratified-topsort
+    [circuit & {:keys [start visited visited-check-fn] :or {start (get-root-node circuit) visited #{}}}]
+    (loop [queue [start] order [[start]] visited visited]
+      (let [visited (into visited queue)
+            queue (transduce
+                   (comp
+                    (map #(uber/out-edges circuit %))
+                    cat
+                    (map :dest)
+                    (remove #(contains? visited %))
+                    (filter #(every?
+                              (fn [in]
+                                (if visited-check-fn
+                                  (or (contains? visited (:src in))
+                                      (visited-check-fn (:src in) %))
+                                  (contains? visited (:src in))))
+                              (uber/in-edges circuit %))))
+                   (completing conj)
+                   []
+                   queue)
+            order (if (seq queue)
+                    (conj order queue)
+                    order)]
+        (if (seq queue)
+          (recur queue
+                 order
+                 visited)
+          order))))
 
 (defn topsort-circuit [circuit & {:keys [stratify?] :as opts}]
   ((if stratify? stratified-topsort topsort)
@@ -132,6 +196,6 @@
             (if (contains? #{:rule :or-join :not-join}
                            (uber/attr query-graph node :type))
               (not (uber/attr query-graph
-                              (uber/find-edge query-graph [dep node])
-                                     :required?))
+                              (uber/find-edge query-graph dep node)
+                              :required?))
               (not (symbol? dep)))))))

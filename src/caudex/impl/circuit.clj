@@ -67,7 +67,7 @@
                              res (apply (:mapping-fn op) args)]
                          [(conj row res) add?])))
                 (first zsets))
-     :neg (update-vals not (first zsets))
+     :neg (update-vals (first zsets) not)
      :delay (first zsets)
      :join (into {}
                  (for [row-1 (first zsets) row-2 (second zsets)
