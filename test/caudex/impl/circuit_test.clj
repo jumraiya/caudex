@@ -91,4 +91,23 @@
       (impl/prn-circuit circuit)
       (is (match?
            [{[2] true [11] false}]
+           output))))
+  (testing "Or joins"
+    (let [q '[:find ?a
+              :where
+              [?a :attr-1 ?b]
+              (or-join [?a ?b]
+                       [(> ?b 100)]
+                       [?a :attr-2 "test"])]
+          ccircuit (c/build-circuit q)
+          circuit (impl/reify-circuit ccircuit)
+          tx-data [[1 :attr-1 12 123 true]
+                   [1 :attr-2 "test" 123 true]
+                   [2 :attr-1 102 123 true]
+                   [3 :attr-1 78 123 true]
+                   [3 :attr-2 "asd" 123 true]]
+          circuit (impl/step circuit tx-data)
+          output (impl/get-output-stream circuit)]
+      (is (match?
+           [{[1] true [2] true}]
            output)))))
