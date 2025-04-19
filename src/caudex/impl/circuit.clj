@@ -14,7 +14,6 @@
 (defn- is-idx? [v]
   (= caudex.dbsp.ValIndex (type v)))
 
-#trace
  (defn reify-circuit
    "Constructs a map representing a circuit along with it's step order"
    [circuit]
@@ -41,7 +40,6 @@
        (map-indexed vector)
        (uber/edges circuit)))))
 
-#trace
  (defn- step-op [op zsets]
    (case (dbsp/-get-op-type op)
      :root (tx-data->zset (first zsets))
@@ -86,24 +84,23 @@
            (first zsets)
            (second zsets))))
 
-#trace
- (defn step
-   "Steps through a reified circuit with transaction data, updating stream values and returning a updated circuit"
-   [data tx-data]
-   (let [data (update-in data [:streams -1] #(conj % tx-data))]
-     (reduce
-      (fn [{:keys [streams op-stream-map] :as data} op]
-        (let [{:keys [inputs outputs]} (get op-stream-map (dbsp/-get-id op))
-              input-vals (mapv #(last (get streams %)) (vals inputs))
-              new-val (step-op op input-vals)]
-          (update data :streams
-                  (fn [s]
-                    (reduce
-                     #(update %1 %2 conj new-val)
-                     s
-                     outputs)))))
-      (update data :t inc)
-      (:order data))))
+(defn step
+  "Steps through a reified circuit with transaction data, updating stream values and returning a updated circuit"
+  [data tx-data]
+  (let [data (update-in data [:streams -1] #(conj % tx-data))]
+    (reduce
+     (fn [{:keys [streams op-stream-map] :as data} op]
+       (let [{:keys [inputs outputs]} (get op-stream-map (dbsp/-get-id op))
+             input-vals (mapv #(last (get streams %)) (vals inputs))
+             new-val (step-op op input-vals)]
+         (update data :streams
+                 (fn [s]
+                   (reduce
+                    #(update %1 %2 conj new-val)
+                    s
+                    outputs)))))
+     (update data :t inc)
+     (:order data))))
 
 (defn get-output-stream [circuit]
   (get-in circuit [:streams -2]))

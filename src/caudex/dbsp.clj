@@ -52,7 +52,6 @@
           idx|const))
       (-get-args this)))))
 
-#trace
  (defn- find-constraints [zset-type-1 zset-type-2]
    (let [collect-pos #(transduce
                        (comp

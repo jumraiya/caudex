@@ -1,4 +1,5 @@
-(ns caudex.core)
+(ns caudex.core
+  (:require [caudex.circuit]))
 
 (defn -main []
   (prn "asdasd"))

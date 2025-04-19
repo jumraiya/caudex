@@ -134,7 +134,6 @@
                         (let [rule-name (get-val (:name rule))
                               branches
                               (reduce
-                               #trace
                                 (fn [branches branch]
                                   (let [inputs (into
                                                 (mapv get-val
