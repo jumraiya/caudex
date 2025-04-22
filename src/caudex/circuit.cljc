@@ -1,40 +1,38 @@
 (ns caudex.circuit
-  "Functions to transform a query graph into a dbsp circuit"
   (:require [caudex.query-analyzer :as qa]
             [clojure.set :as set]
-            [caudex.dbsp :refer :all]
+            [caudex.dbsp :as dbsp]
             [caudex.utils :as utils]
-            [ubergraph.alg :as alg]
-            [ubergraph.core :as uber]))
+            [caudex.graph :as graph]))
 
 (declare build-circuit*)
 
 (defn- find-val-idx [op var]
-  (let [idx (.indexOf (-to-vector (-get-output-type op)) var)]
+  (let [idx (.indexOf (dbsp/-to-vector (dbsp/-get-output-type op)) var)]
     (when (not= -1 idx)
-      (->ValIndex idx))))
+      (dbsp/->ValIndex idx))))
 
 (defn- get-root [circuit]
-  (some #(when (= :root (-get-op-type %)) %) (uber/nodes circuit)))
+  (some #(when (= :root (dbsp/-get-op-type %)) %) (graph/nodes circuit)))
 
 (defn- find-starting-node
   ([graph]
-   (find-starting-node graph (uber/nodes graph)))
+   (find-starting-node graph (graph/nodes graph)))
   ([graph nodes]
    (let [pattern-nodes
          (into #{}
                (filter #(true?
-                         (some (fn [e] (when (= :pattern (uber/attr graph e :clause-type))
+                         (some (fn [e] (when (= :pattern (graph/attr graph e :clause-type))
                                          true))
-                               (uber/out-edges graph %))))
+                               (graph/out-edges graph %))))
                nodes)]
      (or
       (some (fn [node]
               (when (and (contains? pattern-nodes node)
-                         (or (= 0 (uber/in-degree graph node))
-                             (nil? (some #(when (= :pattern (uber/attr graph % :clause-type))
+                         (or (= 0 (graph/in-degree graph node))
+                             (nil? (some #(when (= :pattern (graph/attr graph % :clause-type))
                                             %)
-                                         (uber/in-edges graph node)))))
+                                         (graph/in-edges graph node)))))
                 node))
             nodes)
       (first pattern-nodes)))))
@@ -42,7 +40,7 @@
 (defn- add-op-inputs [circuit op & inputs]
   (reduce
    (fn [c [idx in]]
-     (uber/add-directed-edges c [in op {:arg idx}]))
+     (graph/add-directed-edges c [in op {:arg idx}]))
    circuit
    (map-indexed vector inputs)))
 
@@ -50,12 +48,12 @@
    ([circuit op-1 op-2]
     (join-ops circuit op-1 op-2 false))
    ([circuit op-1 op-2 inverse?]
-    (let [add-1 (->AddOperator (gensym "add-") (-get-output-type op-1))
-          delay-1 (->DelayOperator (gensym "delay-") (-get-output-type op-1))
-          add-2 (->AddOperator (gensym "add-") (-get-output-type op-2))
-          delay-2 (->DelayOperator (gensym "delay-") (-get-output-type op-2))
-          constraints (-get-join-constraints
-                       (-get-output-type op-1) (-get-output-type op-2))
+    (let [add-1 (dbsp/->AddOperator (gensym "add-") (dbsp/-get-output-type op-1))
+          delay-1 (dbsp/->DelayOperator (gensym "delay-") (dbsp/-get-output-type op-1))
+          add-2 (dbsp/->AddOperator (gensym "add-") (dbsp/-get-output-type op-2))
+          delay-2 (dbsp/->DelayOperator (gensym "delay-") (dbsp/-get-output-type op-2))
+          constraints (dbsp/-get-join-constraints
+                       (dbsp/-get-output-type op-1) (dbsp/-get-output-type op-2))
           constraints (if inverse?
                         (mapv (fn [[pred & args :as c]]
                                 (if (= pred =)
@@ -63,18 +61,18 @@
                                   c))
                               constraints)
                         constraints)
-          join-1 (->JoinOperator
+          join-1 (dbsp/->JoinOperator
                   (gensym "join-")
-                  (-get-output-type op-1)
-                  (-get-output-type op-2)
+                  (dbsp/-get-output-type op-1)
+                  (dbsp/-get-output-type op-2)
                   constraints)
-          join-2 (->JoinOperator
+          join-2 (dbsp/->JoinOperator
                   (gensym "join-")
-                  (-get-output-type op-1)
-                  (-get-output-type op-2)
+                  (dbsp/-get-output-type op-1)
+                  (dbsp/-get-output-type op-2)
                   constraints)
-          delay-3 (->DelayOperator (gensym "delay-") (-get-output-type op-2))
-          final-add (->AddOperator (gensym "add-") (-get-output-type join-1))]
+          delay-3 (dbsp/->DelayOperator (gensym "delay-") (dbsp/-get-output-type op-2))
+          final-add (dbsp/->AddOperator (gensym "add-") (dbsp/-get-output-type join-1))]
       [(-> circuit
            (add-op-inputs add-1 op-1 delay-1)
            (add-op-inputs delay-1 add-1)
@@ -89,26 +87,26 @@
 (defn- merge-sub-circuit [circuit sub-circuit args]
   (let [root (get-root circuit)
         sub-circuit-last-op (last (utils/topsort-circuit sub-circuit))
-        projection (->FilterOperator
+        projection (dbsp/->FilterOperator
                     (gensym "proj-")
-                    (-get-output-type sub-circuit-last-op)
+                    (dbsp/-get-output-type sub-circuit-last-op)
                     nil
                     (mapv #(find-val-idx sub-circuit-last-op (first %)) args))
         sub-circuit (add-op-inputs sub-circuit projection sub-circuit-last-op)
         sub-circuit-root (get-root sub-circuit)]
-    [(uber/remove-nodes
+    [(graph/remove-nodes
       (reduce
-       #(let [attrs (uber/attrs sub-circuit %2)]
-          (if (= :root (-get-op-type (:src %2)))
-            (uber/add-directed-edges %1 [root (:dest %2) attrs])
-            (uber/add-directed-edges %1 [(:src %2) (:dest %2) attrs])))
+       #(let [attrs (graph/attrs sub-circuit %2)]
+          (if (= :root (dbsp/-get-op-type (:src %2)))
+            (graph/add-directed-edges %1 [root (:dest %2) attrs])
+            (graph/add-directed-edges %1 [(:src %2) (:dest %2) attrs])))
        circuit
-       (uber/edges sub-circuit))
+       (graph/edges sub-circuit))
       sub-circuit-root)
      projection]))
 
 (defn- join-with-inputs [circuit op input-op-map]
-  (let [o-type (-> op -get-output-type -to-vector set)]
+  (let [o-type (-> op dbsp/-get-output-type dbsp/-to-vector set)]
     (reduce
      (fn [[ret last-op] input-op]
        (join-ops ret last-op input-op))
@@ -116,43 +114,43 @@
      (eduction
       (filter #(contains? o-type (key %)))
       (map val)
-      (filter #(= 0 (uber/out-degree circuit %)))
+      (filter #(= 0 (graph/out-degree circuit %)))
       input-op-map))))
 
 
 (defn- join-pattern-clauses [circuit query-graph root input-op-map]
   (let [start (find-starting-node query-graph)
         pattern-edges #(filterv
-                        (fn [e] (= :pattern (uber/attr query-graph e :clause-type)))
-                        (uber/out-edges query-graph %))
+                        (fn [e] (= :pattern (graph/attr query-graph e :clause-type)))
+                        (graph/out-edges query-graph %))
         var? #(and (symbol? %) (not= '_ %))]
     (loop [processed [] queue (pattern-edges start) ret circuit]
       (let [[ret ops nodes edges last-op]
             (reduce
              (fn [[r ops nodes edges] {:keys [src dest] :as edge}]
-               (let [attr (uber/attr query-graph edge :label)
+               (let [attr (graph/attr query-graph edge :label)
                      conds
                      (cond-> []
-                       (not (symbol? src)) (conj [= (->ValIndex 0) src])
-                       (not (symbol? attr)) (conj [= (->ValIndex 1) attr])
-                       (not (symbol? dest)) (conj [= (->ValIndex 2) dest]))
+                       (not (symbol? src)) (conj [= (dbsp/->ValIndex 0) src])
+                       (not (symbol? attr)) (conj [= (dbsp/->ValIndex 1) attr])
+                       (not (symbol? dest)) (conj [= (dbsp/->ValIndex 2) dest]))
                      selections
                      (cond-> []
-                       (var? src) (conj (->ValIndex 0))
-                       (var? attr) (conj (->ValIndex 1))
-                       (var? dest) (conj (->ValIndex 2)))
+                       (var? src) (conj (dbsp/->ValIndex 0))
+                       (var? attr) (conj (dbsp/->ValIndex 1))
+                       (var? dest) (conj (dbsp/->ValIndex 2)))
                      output-type (filterv var? [src attr dest])
-                     op (->FilterOperator
+                     op (dbsp/->FilterOperator
                          (gensym "datom-") [src attr dest] conds selections)
                      ;; Join with previously processed op that has a common var
                      prev-op
-                     (some #(let [vars (-get-output-type %)]
+                     (some #(let [vars (dbsp/-get-output-type %)]
                               (when (seq (set/intersection (set vars) (set output-type)))
                                 %))
                            processed)
                      [ret last-op] (cond->
                                        (-> r
-                                           (uber/add-nodes op)
+                                           (graph/add-nodes op)
                                            (add-op-inputs op root))
                                        (some? prev-op) (join-ops op prev-op)
                                        (nil? prev-op) (vector op))
@@ -176,7 +174,7 @@
 
 (defn- process-fn|pred [circuit type args last-op query-graph node input-op-map]
   (let [o-type (when (some? last-op)
-                 (-> last-op -get-output-type -to-vector set))
+                 (-> last-op dbsp/-get-output-type dbsp/-to-vector set))
         var-args (into []
                        (comp
                         (map first)
@@ -198,26 +196,27 @@
                        (find-val-idx last-op arg)
                        arg)]
              (if (and (nil? idx) (symbol? arg) required?)
-               (throw (Exception. (str "Could not find " arg " in input op")))
+               #?(:cljs (prn (str "Could not find " arg " in input op"))
+                  :clj (throw (Exception. (str "Could not find " arg " in input op"))))
                idx)))
          args)]
     (case type
-      :pred (let [op (->FilterOperator
+      :pred (let [op (dbsp/->FilterOperator
                       (gensym "pred-")
-                      (-get-output-type last-op)
-                      [(into [(uber/attr query-graph node :fn)]
+                      (dbsp/-get-output-type last-op)
+                      [(into [(graph/attr query-graph node :fn)]
                              indices)]
                       nil)]
               [(add-op-inputs circuit op last-op) op])
-      :fn (let [binding (some #(when (= :binding (uber/attr query-graph % :label)) %)
-                              (uber/out-edges query-graph node))
-                op (->MapOperator (gensym "fn-")
-                                  (-get-output-type last-op)
-                                  (conj (-> last-op
-                                            (-get-output-type) (-to-vector))
-                                        (:dest binding))
-                                  (uber/attr query-graph node :fn)
-                                  indices)]
+      :fn (let [binding (some #(when (= :binding (graph/attr query-graph % :label)) %)
+                              (graph/out-edges query-graph node))
+                op (dbsp/->MapOperator (gensym "fn-")
+                                       (dbsp/-get-output-type last-op)
+                                       (conj (-> last-op
+                                                 (dbsp/-get-output-type) (dbsp/-to-vector))
+                                             (:dest binding))
+                                       (graph/attr query-graph node :fn)
+                                       indices)]
             [(add-op-inputs circuit op last-op) op]))))
 
 
@@ -227,11 +226,12 @@
      (let [idx (when (some? source)
                  (find-val-idx source in))
            _ (when (and (nil? idx) (not (contains? input-op-map in)) required?)
-               (throw (Exception. (str "Could not find input " in))))]
+               #?(:cljs (prn (str "Could not find input " in))
+                  :clj (throw (Exception. (str "Could not find input " in)))))]
        (cond
-         (some? idx) (let [op (->FilterOperator
+         (some? idx) (let [op (dbsp/->FilterOperator
                                (gensym "input-")
-                               (-get-output-type source)
+                               (dbsp/-get-output-type source)
                                nil
                                [idx])]
                        [(add-op-inputs c op source) (assoc m in op)])
@@ -245,7 +245,7 @@
    [circuit input-op query-graph rules input-op-map]
    (let [nodes (filterv
                 #(contains? #{:or-join :not-join :pred :fn :rule}
-                            (uber/attr query-graph % :type))
+                            (graph/attr query-graph % :type))
                 (utils/topsort-query-graph query-graph))]
      (reduce
       (fn [[circuit last-op] node]
@@ -253,20 +253,20 @@
                     second
                     (into []
                           (comp
-                           (filter #(= :arg (first (uber/attr query-graph % :label))))
-                           (map #(vector (:src %) (second (uber/attr query-graph % :label)) (uber/attr query-graph % :required?))))
-                          (uber/in-edges query-graph node)))]
-          (case (uber/attr query-graph node :type)
+                           (filter #(= :arg (first (graph/attr query-graph % :label))))
+                           (map #(vector (:src %) (second (graph/attr query-graph % :label)) (graph/attr query-graph % :required?))))
+                          (graph/in-edges query-graph node)))]
+          (case (graph/attr query-graph node :type)
             (:pred :fn)
-            (process-fn|pred circuit (uber/attr query-graph node :type) args last-op query-graph node input-op-map)
+            (process-fn|pred circuit (graph/attr query-graph node :type) args last-op query-graph node input-op-map)
             :not-join (let [[circuit input-ops] (mk-input-ops circuit last-op args input-op-map)
                             [sub-circuit] (build-circuit* (mapv first args) node rules input-ops)
                             [circuit not-join-last-op] (merge-sub-circuit circuit sub-circuit args)]
                         (if (some? last-op)
                           (join-ops circuit not-join-last-op last-op true)
-                          (let [neg-op (->NegOperator
+                          (let [neg-op (dbsp/->NegOperator
                                         (gensym "neg-")
-                                        (-get-output-type not-join-last-op))]
+                                        (dbsp/-get-output-type not-join-last-op))]
                             [(add-op-inputs circuit neg-op not-join-last-op) neg-op])))
             :or-join (let [[circuit input-ops]
                            (mk-input-ops circuit last-op args input-op-map)
@@ -279,14 +279,14 @@
                                 [circuit (conj acc output)]))
                             [circuit []]
                             (eduction
-                             (filter #(= :conj (uber/attr query-graph % :label)))
+                             (filter #(= :conj (graph/attr query-graph % :label)))
                              (map :dest)
-                             (uber/out-edges query-graph node)))
+                             (graph/out-edges query-graph node)))
                            [circuit or-last-op]
                            (reduce
                             (fn [[circuit output] output']
-                              (let [add-op (->AddOperator
-                                            (gensym "add-") (-get-output-type output))]
+                              (let [add-op (dbsp/->AddOperator
+                                            (gensym "add-") (dbsp/-get-output-type output))]
                                 [(add-op-inputs circuit add-op output output') add-op]))
                             [circuit (first sub-circuit-outputs)]
                             (rest sub-circuit-outputs))]
@@ -298,49 +298,50 @@
       nodes)))
 
  (defn- build-circuit*
-   ([inputs query-graph rules]
-    (build-circuit* inputs query-graph rules nil))
-   ([inputs query-graph rules input-op-map & {:keys [join-unconnected?] :or {join-unconnected? false}}]
-    (let [components (alg/connected-components query-graph)
-          _ (when (and (> (count components) 1) (not join-unconnected?))
-              (throw (Exception. "Cannot have disjoint query components")))
-          root (->RootOperator (gensym "root-"))
-          circuit (-> (uber/ubergraph false false)
-                      (uber/add-nodes root))
-          [input-op-map connect?]
-          (if (map? input-op-map)
-            [input-op-map false]
-            [(into {}
-                   (map
-                    #(vector
-                      %
-                      (->FilterOperator
-                       (gensym "input-")
-                       [::input % %]
-                       [[= ::input (->ValIndex 0)]
-                        [= % (->ValIndex 1)]]
-                       [(->ValIndex 2)])))
-                   inputs)
-             true])
-          circuit (if (and (seq inputs) connect?)
-                    (reduce
-                     #(add-op-inputs %1 (val %2) root)
-                     circuit input-op-map)
-                    (reduce
-                     #(uber/add-nodes %1 (val %2))
-                     circuit input-op-map))
-          [circuit last-op] (join-pattern-clauses circuit query-graph root input-op-map)
-          [circuit last-op] (process-non-pattern-clauses circuit last-op query-graph rules input-op-map)
-          loners (alg/loners circuit)]
-      (if (and join-unconnected? (seq loners))
-        (reduce
-         (fn [[c op] op-2]
-           (join-ops c op op-2))
-         [circuit last-op]
-         (eduction
-          (remove #(= :root (-get-op-type %)))
-          loners))
-        [circuit last-op]))))
+  ([inputs query-graph rules]
+   (build-circuit* inputs query-graph rules nil))
+  ([inputs query-graph rules input-op-map & {:keys [join-unconnected?] :or {join-unconnected? false}}]
+   (let [components (graph/connected-components query-graph)
+         _ (when (and (> (count components) 1) (not join-unconnected?))
+             #?(:cljs (prn "Cannot have disjoint query components")
+                :clj (throw (Exception. "Cannot have disjoint query components"))))
+         root (dbsp/->RootOperator (gensym "root-"))
+         circuit (-> (graph/new-graph)
+                     (graph/add-nodes root))
+         [input-op-map connect?]
+         (if (map? input-op-map)
+           [input-op-map false]
+           [(into {}
+                  (map
+                   #(vector
+                     %
+                     (dbsp/->FilterOperator
+                      (gensym "input-")
+                      [::input % %]
+                      [[= ::input (dbsp/->ValIndex 0)]
+                       [= % (dbsp/->ValIndex 1)]]
+                      [(dbsp/->ValIndex 2)])))
+                  inputs)
+            true])
+         circuit (if (and (seq inputs) connect?)
+                   (reduce
+                    #(add-op-inputs %1 (val %2) root)
+                    circuit input-op-map)
+                   (reduce
+                    #(graph/add-nodes %1 (val %2))
+                    circuit input-op-map))
+         [circuit last-op] (join-pattern-clauses circuit query-graph root input-op-map)
+         [circuit last-op] (process-non-pattern-clauses circuit last-op query-graph rules input-op-map)
+         loners (graph/loners circuit)]
+     (if (and join-unconnected? (seq loners))
+       (reduce
+        (fn [[c op] op-2]
+          (join-ops c op op-2))
+        [circuit last-op]
+        (eduction
+         (remove #(= :root (dbsp/-get-op-type %)))
+         loners))
+       [circuit last-op]))))
 
  (defn build-circuit
    ([query]
@@ -349,9 +350,9 @@
     (let [{:keys [inputs projections rules graph]} (qa/analyze query rules)
           [circuit last-op] (build-circuit* inputs graph rules)
           proj-vars (into [] (comp (map :symbol) (filter some?)) projections)
-          projection (->FilterOperator
+          projection (dbsp/->FilterOperator
                       (gensym "proj-")
-                      (-get-output-type last-op)
+                      (dbsp/-get-output-type last-op)
                       []
                       (mapv #(find-val-idx last-op %) proj-vars))]
       (add-op-inputs circuit projection last-op))))

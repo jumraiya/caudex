@@ -1,0 +1,11 @@
+;; shadow-cljs configuration
+{:source-paths
+ ["src"]
+
+ :dependencies
+ [[datascript/datascript "1.7.4"]
+  [aysylu/loom "1.0.2"]]
+
+ :builds
+ {:caudex {:target :browser
+           :modules {:main {:entries [caudex.core]}}}}}
