@@ -114,7 +114,8 @@
               [{:type :map
                 :inputs '[[?in ?b ?a ?in]]
                 :output '[?in ?b ?a ?in ?c]
-                :mapping-fn (m/any-of + (m/pred #(= + %)))
+                :mapping-fn ;(m/pred #(= + %))
+                (m/any-of #'+ (m/pred #(= + %)))
                 :args [[:idx 1] 10]}]
               [{:type :filter
                 :inputs '[[?in ?b ?a ?in ?c]]
