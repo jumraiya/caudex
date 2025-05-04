@@ -1,0 +1,8 @@
+{
+  "devDependencies": {
+    "shadow-cljs": "^2.28.23"
+  },
+  "dependencies": {
+    "vis-network": "^9.1.9"
+  }
+}

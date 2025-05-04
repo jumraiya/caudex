@@ -1,6 +1,7 @@
 (ns caudex.query-analyzer
   "Functions for processing a query and generating a graph from it"
   (:require [datascript.parser :as ds.p]
+            [datascript.built-ins :as d.fns]
             [caudex.graph :as graph]
             [clojure.walk :as walk]))
 
@@ -66,9 +67,12 @@
     [(cond->
       (reduce
        (fn [g [idx arg]]
-         (let [f-name (if (#{:fn :pred} fn-type)
-                        #?(:clj (-> clause :fn :symbol resolve var-get)
-                           :cljs (-> clause :fn :symbol))
+         (let [fn-sym (-> clause :fn :symbol)
+               f-name (if (#{:fn :pred} fn-type)
+                        #?(:clj (-> fn-sym resolve var-get)
+                           :cljs (if-let [f (get d.fns/query-fns fn-sym)]
+                                   f
+                                   (throw (js/Error. (str "Could not find fn " fn-sym)))))
                         (-> clause :name get-val))
                arg-name (get-val arg)]
            (-> g
@@ -122,10 +126,11 @@
    (-> {:graph (reduce graph/add-nodes
                 (graph/new-graph)
                 inputs)
-        :rule-defs rule-defs}
+        :rule-defs rule-defs
+        :inputs inputs}
        (process-where-clauses where-clauses))))
 
- (defn analyze
+(defn analyze
   ([q]
    (analyze q []))
   ([q rules]

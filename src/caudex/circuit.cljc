@@ -12,7 +12,7 @@
     (when (not= -1 idx)
       (dbsp/->ValIndex idx))))
 
-(defn- get-root [circuit]
+#_(defn- get-root [circuit]
   (some #(when (= :root (dbsp/-get-op-type %)) %) (graph/nodes circuit)))
 
 (defn- find-starting-node
@@ -85,7 +85,8 @@
        final-add])))
 
 (defn- merge-sub-circuit [circuit sub-circuit args]
-  (let [root (get-root circuit)
+  (let [root (utils/get-root-node circuit)
+        ;_ (utils/prn-graph sub-circuit "subgraph")
         sub-circuit-last-op (last (utils/topsort-circuit sub-circuit))
         projection (dbsp/->FilterOperator
                     (gensym "proj-")
@@ -93,17 +94,22 @@
                     nil
                     (mapv #(find-val-idx sub-circuit-last-op (first %)) args))
         sub-circuit (add-op-inputs sub-circuit projection sub-circuit-last-op)
-        sub-circuit-root (get-root sub-circuit)]
-    [(graph/remove-nodes
-      (reduce
-       #(let [attrs (graph/attrs sub-circuit %2)]
-          (if (= :root (dbsp/-get-op-type (:src %2)))
-            (graph/add-directed-edges %1 [root (:dest %2) attrs])
-            (graph/add-directed-edges %1 [(:src %2) (:dest %2) attrs])))
-       circuit
-       (graph/edges sub-circuit))
-      sub-circuit-root)
-     projection]))
+        ;; _ (prn (utils/datafy-circuit sub-circuit))
+        ;; _ (prn (utils/datafy-circuit circuit))
+        sub-circuit-root (utils/get-root-node sub-circuit)
+        ;; _ (prn "sub circuit root" sub-circuit-root)
+        ;; _ (prn "main circuit root" root)
+        circuit (reduce
+                 (fn [circuit {:keys [src dest] :as edge}]
+                   (let [attrs (graph/attrs sub-circuit edge)]
+                     (if (= sub-circuit-root src)
+                       (graph/add-directed-edges circuit [root dest attrs])
+                       (graph/add-directed-edges circuit [src dest attrs]))))
+                 circuit
+                 (graph/edges sub-circuit))
+        ;_ (prn (utils/datafy-circuit circuit))
+        ]
+    [circuit projection]))
 
 (defn- join-with-inputs [circuit op input-op-map]
   (let [o-type (-> op dbsp/-get-output-type dbsp/-to-vector set)]
@@ -333,6 +339,7 @@
          [circuit last-op] (join-pattern-clauses circuit query-graph root input-op-map)
          [circuit last-op] (process-non-pattern-clauses circuit last-op query-graph rules input-op-map)
          loners (graph/loners circuit)]
+     ;(prn (utils/datafy-circuit circuit))
      (if (and join-unconnected? (seq loners))
        (reduce
         (fn [[c op] op-2]
@@ -344,18 +351,20 @@
        [circuit last-op]))))
 
  (defn build-circuit
-   ([query]
-    (build-circuit query []))
-   ([query rules]
-    (let [{:keys [inputs projections rules graph]} (qa/analyze query rules)
-          [circuit last-op] (build-circuit* inputs graph rules)
-          proj-vars (into [] (comp (map :symbol) (filter some?)) projections)
-          projection (dbsp/->FilterOperator
-                      (gensym "proj-")
-                      (dbsp/-get-output-type last-op)
-                      []
-                      (mapv #(find-val-idx last-op %) proj-vars))]
-      (add-op-inputs circuit projection last-op))))
+  ([query]
+   (build-circuit query []))
+  ([query rules]
+   (let [{:keys [inputs projections rules graph]} (qa/analyze query rules)
+         [circuit last-op] (build-circuit* inputs graph rules)
+         proj-vars (into [] (comp (map :symbol) (filter some?)) projections)
+         projection (dbsp/->FilterOperator
+                     (gensym "proj-")
+                     (dbsp/-get-output-type last-op)
+                     []
+                     (mapv #(find-val-idx last-op %) proj-vars))
+         c (add-op-inputs circuit projection last-op)]
+      ;(utils/prn-graph c)
+     c)))
 
 
 (comment

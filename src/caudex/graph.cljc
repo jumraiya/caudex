@@ -60,18 +60,18 @@
 (defn add-attr [graph node|edge attr value]
   #?(:clj (uber/add-attr graph node|edge attr value)
      :cljs (if (and (map? node|edge) (contains? node|edge :src))
-             (apply loom/add-attr
-                    (conj [graph] (:src node|edge) (:dest node|edge)) attr value)
-             (loom/add-attr graph node|edge attr value))))
+             (apply l.attr/add-attr
+                    (conj [graph] (:src node|edge) (:dest node|edge) attr value))
+             (l.attr/add-attr graph node|edge attr value))))
 
 (defn add-attrs [graph node|edge attrs]
   #?(:clj (uber/add-attrs graph node|edge attrs)
      :cljs (reduce
             (fn [g [attr value]]
               (if (and (map? node|edge) (contains? node|edge :src))
-                (apply loom/add-attr
-                       (conj [g] (:src node|edge) (:dest node|edge)) attr value)
-                (loom/add-attr g node|edge attr value)))
+                (apply l.attr/add-attr
+                       (conj [g] (:src node|edge) (:dest node|edge) attr value))
+                (l.attr/add-attr g node|edge attr value)))
             graph
             attrs)))
 
@@ -84,7 +84,7 @@
 
 (defn remove-nodes [graph & nodes]
   #?(:clj (uber/remove-nodes graph nodes)
-     :cljs (loom/remove-nodes graph nodes)))
+     :cljs (apply loom/remove-nodes (into [graph] nodes))))
 
 (defn add-nodes [graph & nodes]
   #?(:clj (apply uber/add-nodes (into [graph] nodes))
@@ -109,3 +109,14 @@
 (defn loners [graph]
   #?(:clj (alg/loners graph)
      :cljs (l.alg/loners graph)))
+
+(defn is-graph? [obj]
+  #?(:clj (uber/ubergraph? obj)
+     :cljs (loom/graph? obj)))
+
+(defn graph->edn [g]
+  #?(:clj (uber/ubergraph->edn g)
+     :cljs {:nodes (vec (for [node (nodes g)] [node (attrs g node)]))
+            :directed-edges (mapv (fn [{:keys [src dest] :as edge}]
+                                    (vector src dest (attrs g edge)))
+                                  (edges g))}))
