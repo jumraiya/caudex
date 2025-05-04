@@ -2,7 +2,7 @@
   "Simple implementation of circuit reification for testing purposes.
   ZSets are represented as maps e.g. {[[12 \"some-val\" :ad] [23]] true}. Values are booleans instead of numbers true -> 1, false -> -1"
   (:require [caudex.utils :as utils]
-            [ubergraph.core :as uber]
+            [caudex.graph :as graph]
             [caudex.dbsp :as dbsp]))
 
 (defn- tx-data->zset [txs]
@@ -18,11 +18,11 @@
    "Constructs a map representing a circuit along with it's step order"
    [circuit]
    (let [order (utils/topsort-circuit circuit)
-         root (some #(when (= :root (dbsp/-get-op-type %)) %) (uber/nodes circuit))
+         root (some #(when (= :root (dbsp/-get-op-type %)) %) (graph/nodes circuit))
          last-op (last order)]
      (reduce
       (fn [g [idx {:keys [src dest] :as e}]]
-        (let [arg-idx (uber/attr circuit e :arg)]
+        (let [arg-idx (graph/attr circuit e :arg)]
           (-> g
               (assoc-in [:streams idx] [])
               (update :op-stream-map
@@ -38,7 +38,7 @@
        :order order}
       (eduction
        (map-indexed vector)
-       (uber/edges circuit)))))
+       (graph/edges circuit)))))
 
  (defn- step-op [op zsets]
    (case (dbsp/-get-op-type op)

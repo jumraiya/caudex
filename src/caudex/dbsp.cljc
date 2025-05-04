@@ -38,7 +38,8 @@
 (defrecord ValIndex [idx])
 
 ;; Assumes constraint is defined as [pred-fn val-index-1 val-index-2]
-(extend-type clojure.lang.PersistentVector
+(extend-type #?(:clj clojure.lang.PersistentVector
+                :cljs cljs.core/PersistentVector)
   Constraint
   (-get-pred [this] (first this))
   (-get-args [this] (subvec this 1))
@@ -75,7 +76,8 @@
       []
       indices-1)))
 
-(extend-type clojure.lang.PersistentVector
+(extend-type #?(:clj clojure.lang.PersistentVector
+                :cljs cljs.core/PersistentVector)
   ZSetType
   (-to-vector [this] this)
   (-get-joined-type [this new-type] (into this new-type))

@@ -3,7 +3,8 @@
             [caudex.circuit :as c]
             [caudex.impl.circuit :as impl]
             [matcher-combinators.test]
-            [matcher-combinators.matchers :as m]))
+            [matcher-combinators.matchers :as m]
+            [caudex.utils :as utils]))
 
 
 (deftest test-reify+step-circuit
@@ -48,7 +49,8 @@
                 [?a :attr-1 ?b]
                 [(> ?b 4)]
                 [(* ?b 100) ?c]]
-            circuit (impl/reify-circuit (c/build-circuit q))
+            c (c/build-circuit q)
+            circuit (impl/reify-circuit c)
             tx-data [[1 :attr-1 2 123 true]
                      [3 :attr-1 10 123 true]]
             circuit (impl/step circuit tx-data)

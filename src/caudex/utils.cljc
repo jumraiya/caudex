@@ -1,9 +1,10 @@
 (ns caudex.utils
   (:require
-   [ubergraph.core :as uber]
+   [caudex.graph :as graph]
    [caudex.dbsp :as dbsp]
    [clojure.core.protocols :refer [datafy]]
-   [com.phronemophobic.clj-graphviz :refer [render-graph]]))
+   #?(:clj [com.phronemophobic.clj-graphviz :refer [render-graph]]
+       :cljs ["vis-network" :as vis])))
 
 
 (defn is-op? [in]
@@ -19,19 +20,23 @@
 
 
 (defn get-root-node [graph]
-  (some
-   #(when (or (and (is-op? %)
-                   (= :root (dbsp/-get-op-type %)))
-              (= 0 (uber/in-degree graph %)))
-      %)
-   (uber/nodes graph)))
+  (or
+   (some
+    #(when (and (is-op? %)
+                (= :root (dbsp/-get-op-type %)))
+       %)
+    (graph/nodes graph))
+   (some
+    #(when (= 0 (graph/in-degree graph %))
+           %)
+    (graph/nodes graph))))
 
 (defn graph->edn [graph]
-  (let [edn (uber/ubergraph->edn graph)]
+  (let [edn (graph/graph->edn graph)]
     (-> edn
         (update :nodes (fn [nodes]
                          (mapv (fn [[n attrs]]
-                                 [(if (uber/ubergraph? n)
+                                 [(if (graph/is-graph? n)
                                     (graph->edn n)
                                     (or (op->edn n) n))
                                   attrs])
@@ -39,54 +44,48 @@
         (update :directed-edges (fn [edges]
                                   (mapv
                                    (fn [[src dest attrs]]
-                                     [(if (uber/ubergraph? src)
+                                     [(if (graph/is-graph? src)
                                         (graph->edn src)
                                         (or (op->edn src) src))
-                                      (if (uber/ubergraph? dest)
+                                      (if (graph/is-graph? dest)
                                         (graph->edn dest)
                                         (or (op->edn dest) dest))
                                       attrs])
                                    edges))))))
 
-(defn prn-graph [g]
-  (letfn [(display [n]
-            (if n
-              (if-let [op (or (op->edn n)
-                              (uber/attr g n :op))]
-                (str op (uber/attr g n :pattern))
-                (str n))
-              "nil"))]
-    (render-graph
-     (assoc
-      {:nodes (mapv display (uber/nodes g))
-       :edges (into []
-                    (map #(hash-map :from (display (:src %)) :to (display (:dest %))
-                                    :label (str (get-in (:attrs g) [(:id %) :label]))))
-                    (uber/edges g))}
-      :flags #{:directed} :default-attributes {:edge {:label "label"}}))))
+(defn- display-node [g n]
+  (if n
+    (if-let [op (or (op->edn n)
+                    (graph/attr g n :op))]
+      (str op (graph/attr g n :pattern))
+      (str n))
+    "nil"))
 
- #_(defn topsort
-   [circuit & {:keys [start visited visited-check-fn]
-               :or {start (get-root-node circuit) visited #{}}}]
-   (loop [queue [start] order [] visited visited]
-     (let [[cur & queue] queue
-           visited (conj visited cur)
-           queue (into (vec queue)
-                       (comp (map :dest)
-                             (remove #(contains? visited %))
-                             (filter #(every?
-                                       (fn [in]
-                                         (if visited-check-fn
-                                           (or (contains? visited (:src in))
-                                               (visited-check-fn (:src in) %))
-                                           (contains? visited (:src in))))
-                                       (uber/in-edges circuit %))))
-                       (uber/out-edges circuit cur))]
-       (if (seq queue)
-         (recur queue
-                (conj order cur)
-                visited)
-         (conj order cur)))))
+
+(defn prn-graph
+  ([g]
+   (prn-graph g "graph"))
+  ([g container-id]
+   #?(:clj
+      (render-graph
+       (assoc
+        {:nodes (mapv #(display-node g %) (graph/nodes g))
+         :edges (into []
+                      (map #(hash-map :from (display-node g (:src %))
+                                      :to (display-node g  (:dest %))
+                                      :label (str (get-in (:attrs g) [(:id %) :label]))))
+                      (graph/edges g))}
+        :flags #{:directed} :default-attributes {:edge {:label "label"}}))
+      :cljs (let [ids (into {} (map-indexed #(vector (:id %2) [%1 %2]) (graph/nodes g)))
+                  nodes (apply array (mapv #(js-obj "id" (first (get ids (:id %)))
+                                                    "label" (display-node g (second (get ids (:id %)))))
+                                           (graph/nodes g)))
+                  edges (apply array (mapv #(js-obj "from" (first (get ids (-> % :src :id)))
+                                                    "to" (first (get ids (->  % :dest :id))))
+                                           (graph/edges g)))
+                  container (.getElementById js/document container-id)]
+              (vis/Network. container (js-obj "nodes" nodes "edges" edges)
+                            #js {"edges" #js{"arrows" #js {"to" #js {"enabled" true}}}})))))
 
 (defn topsort
   [circuit & {:keys [start visited visited-check-fn]
@@ -94,8 +93,8 @@
   (let [queue (into [start]
                     (filter #(and
                               (not= start %)
-                              (= 0 (uber/in-degree circuit %))))
-                    (uber/nodes circuit))]
+                              (= 0 (graph/in-degree circuit %))))
+                    (graph/nodes circuit))]
     (loop [queue queue order [] visited visited]
       (let [[cur & queue] queue
             visited (conj visited cur)
@@ -109,8 +108,8 @@
                                             (or (contains? visited (:src in))
                                                 (visited-check-fn (:src in) %))
                                             (contains? visited (:src in))))
-                                        (uber/in-edges circuit %))))
-                        (uber/out-edges circuit cur))]
+                                        (graph/in-edges circuit %))))
+                        (graph/out-edges circuit cur))]
         (if (seq queue)
           (recur queue
                  (conj order cur)
@@ -122,13 +121,13 @@
   (let [queue (into [start]
                     (filter #(and
                               (not= start %)
-                              (= 0 (uber/in-degree circuit %))))
-                    (uber/nodes circuit))]
+                              (= 0 (graph/in-degree circuit %))))
+                    (graph/nodes circuit))]
    (loop [queue queue order [[start]] visited visited]
      (let [visited (into visited queue)
            queue (transduce
                   (comp
-                   (map #(uber/out-edges circuit %))
+                   (map #(graph/out-edges circuit %))
                    cat
                    (map :dest)
                    (remove #(contains? visited %))
@@ -139,7 +138,7 @@
                                  (or (contains? visited (:src in))
                                      (visited-check-fn (:src in) %))
                                  (contains? visited (:src in))))
-                             (uber/in-edges circuit %))))
+                             (graph/in-edges circuit %))))
                   (completing conj)
                   []
                   queue)
@@ -152,34 +151,6 @@
                 visited)
          order)))))
 
-#_(defn stratified-topsort
-    [circuit & {:keys [start visited visited-check-fn] :or {start (get-root-node circuit) visited #{}}}]
-    (loop [queue [start] order [[start]] visited visited]
-      (let [visited (into visited queue)
-            queue (transduce
-                   (comp
-                    (map #(uber/out-edges circuit %))
-                    cat
-                    (map :dest)
-                    (remove #(contains? visited %))
-                    (filter #(every?
-                              (fn [in]
-                                (if visited-check-fn
-                                  (or (contains? visited (:src in))
-                                      (visited-check-fn (:src in) %))
-                                  (contains? visited (:src in))))
-                              (uber/in-edges circuit %))))
-                   (completing conj)
-                   []
-                   queue)
-            order (if (seq queue)
-                    (conj order queue)
-                    order)]
-        (if (seq queue)
-          (recur queue
-                 order
-                 visited)
-          order))))
 
 (defn topsort-circuit [circuit & {:keys [stratify?] :as opts}]
   ((if stratify? stratified-topsort topsort)
@@ -194,8 +165,12 @@
    (assoc opts :visited-check-fn
           (fn [dep node]
             (if (contains? #{:rule :or-join :not-join}
-                           (uber/attr query-graph node :type))
-              (not (uber/attr query-graph
-                              (uber/find-edge query-graph dep node)
+                           (graph/attr query-graph node :type))
+              (not (graph/attr query-graph
+                              (graph/find-edge query-graph dep node)
                               :required?))
               (not (symbol? dep)))))))
+
+(defn datafy-circuit [circuit]
+  (mapv #(mapv datafy %)
+        (topsort-circuit circuit :stratify? true)))

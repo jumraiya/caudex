@@ -1,7 +1,8 @@
 (ns caudex.query-analyzer
   "Functions for processing a query and generating a graph from it"
   (:require [datascript.parser :as ds.p]
-            [ubergraph.core :as uber]
+            [datascript.built-ins :as d.fns]
+            [caudex.graph :as graph]
             [clojure.walk :as walk]))
 
 
@@ -21,35 +22,35 @@
     '_))
 
 (defn- is-var-required? [graph var]
-  (if (or (some #(when (= :binding (uber/attr graph % :label)) %)
-                (uber/in-edges graph var))
-          (some #(when (= :pattern (uber/attr graph % :clause-type)) %)
-                (into (uber/out-edges graph var)
-                      (uber/in-edges graph var))))
+  (if (or (some #(when (= :binding (graph/attr graph % :label)) %)
+                (graph/in-edges graph var))
+          (some #(when (= :pattern (graph/attr graph % :clause-type)) %)
+                (into (graph/out-edges graph var)
+                      (graph/in-edges graph var))))
     false
     (reduce
      (fn [res {:keys [dest] :as edge}]
-       (case (uber/attr graph dest :type)
+       (case (graph/attr graph dest :type)
          :or-join (or (some
                        (fn [edge]
                          (when (true? (is-var-required? (:dest edge) var))
                            true))
                        (eduction
-                        (filter (fn [e] (= :conj (uber/attr graph e :label))))
-                        (uber/out-edges graph dest)))
+                        (filter (fn [e] (= :conj (graph/attr graph e :label))))
+                        (graph/out-edges graph dest)))
                       false)
          :not-join (is-var-required? dest var)
-         :rule (if (true? (uber/attr graph edge :required?)) true false)
+         :rule (if (true? (graph/attr graph edge :required?)) true false)
          res))
      true
-     (uber/out-edges graph var))))
+     (graph/out-edges graph var))))
 
 (defn- mark-required-vars [graph node vars]
   (reduce
    (fn [g var]
-     (let [edge (uber/find-edge g var node)]
+     (let [edge (graph/find-edge g var node)]
        (if edge
-        (uber/add-attr g edge :required? true)
+        (graph/add-attr g edge :required? true)
         g)))
    graph
    (eduction
@@ -66,29 +67,33 @@
     [(cond->
       (reduce
        (fn [g [idx arg]]
-         (let [f-name (if (#{:fn :pred} fn-type)
-                        (-> clause :fn :symbol resolve var-get)
+         (let [fn-sym (-> clause :fn :symbol)
+               f-name (if (#{:fn :pred} fn-type)
+                        #?(:clj (-> fn-sym resolve var-get)
+                           :cljs (if-let [f (get d.fns/query-fns fn-sym)]
+                                   f
+                                   (throw (js/Error. (str "Could not find fn " fn-sym)))))
                         (-> clause :name get-val))
                arg-name (get-val arg)]
            (-> g
-               (uber/add-directed-edges
+               (graph/add-directed-edges
                 [arg-name fn-node (cond-> {:label [:arg idx]
-                                                :clause-type (case fn-type
-                                                               :pred :pred-arg
-                                                               :fn :fn-arg
-                                                               :rule :rule-arg)}
-                                         (and (= :rule fn-type)
-                                              (contains?
-                                               (-> rule-defs f-name :required-vars)
-                                               idx))
-                                         (assoc :required? true))])
-               (uber/add-attrs fn-node
-                               {:fn f-name
-                                :type fn-type}))))
+                                           :clause-type (case fn-type
+                                                          :pred :pred-arg
+                                                          :fn :fn-arg
+                                                          :rule :rule-arg)}
+                                    (and (= :rule fn-type)
+                                         (contains?
+                                          (-> rule-defs f-name :required-vars)
+                                          idx))
+                                    (assoc :required? true))])
+               (graph/add-attrs fn-node
+                                {:fn f-name
+                                 :type fn-type}))))
        graph
        (eduction (map-indexed vector) (:args clause)))
        (= fn-type :fn)
-       (uber/add-directed-edges
+       (graph/add-directed-edges
         [fn-node (-> clause :binding :variable :symbol) {:label :binding}]))
      counters]))
 
@@ -101,7 +106,7 @@
                (let [src (-> clause :pattern first get-val)
                      dest (-> clause :pattern last get-val)
                      attr (-> clause :pattern second get-val)]
-                 [(uber/add-directed-edges graph
+                 [(graph/add-directed-edges graph
                                            [src dest {:label attr
                                                       :clause-type :pattern}])
                   counters])
@@ -118,13 +123,14 @@
   ([inputs where-clauses]
    (build-query-graph inputs where-clauses {}))
   ([inputs where-clauses rule-defs]
-   (-> {:graph (reduce uber/add-nodes
-                (uber/ubergraph false false)
+   (-> {:graph (reduce graph/add-nodes
+                (graph/new-graph)
                 inputs)
-        :rule-defs rule-defs}
+        :rule-defs rule-defs
+        :inputs inputs}
        (process-where-clauses where-clauses))))
 
- (defn analyze
+(defn analyze
   ([q]
    (analyze q []))
   ([q rules]
@@ -148,11 +154,11 @@
                                                              (filter (fn [[_idx var]] (is-var-required? graph var)))
                                                              (map first))
                                                             inputs)
-                                        recursive-nodes (filterv #(and (= :rule (uber/attr graph % :type))
-                                                                       (= rule-name (uber/attr graph % :fn)))
-                                                                 (uber/nodes graph))
+                                        recursive-nodes (filterv #(and (= :rule (graph/attr graph % :type))
+                                                                       (= rule-name (graph/attr graph % :fn)))
+                                                                 (graph/nodes graph))
                                         graph (reduce
-                                               #(uber/add-attr %1 %2 :rule-feedback rule-name)
+                                               #(graph/add-attr %1 %2 :rule-feedback rule-name)
                                                graph
                                                recursive-nodes)
                                         recursive? (boolean (seq recursive-nodes))]
@@ -208,9 +214,9 @@
         or-id (get counters :or 0)
         or-node (str "or-" or-id)
         graph (reduce
-               #(uber/add-directed-edges %1 %2)
+               #(graph/add-directed-edges %1 %2)
                (-> graph
-                   (uber/add-nodes-with-attrs [or-node {:type :or-join}]))
+                   (graph/add-nodes-with-attrs [or-node {:type :or-join}]))
                (eduction (map-indexed (fn [idx var]
                                         [var or-node {:label [:arg idx]}])) vars))
         counters (assoc counters :or (inc or-id))
@@ -223,8 +229,8 @@
                              (build-query-graph vars [clause] rule-defs))
                  conj-id (get counters :conj 0)]
              [(-> graph
-                  (uber/add-nodes-with-attrs [new-graph {:op (str "conj-" conj-id)}])
-                  (uber/add-directed-edges [or-node new-graph {:label :conj}]))
+                  (graph/add-nodes-with-attrs [new-graph {:op (str "conj-" conj-id)}])
+                  (graph/add-directed-edges [or-node new-graph {:label :conj}]))
               (update counters :conj #(inc (or % 0)))]))
          [graph counters]
          clauses)]
@@ -236,9 +242,9 @@
         not-id (get counters :not 0)]
     [(mark-required-vars
       (reduce
-       #(uber/add-directed-edges %1 %2)
+       #(graph/add-directed-edges %1 %2)
        (-> graph
-           (uber/add-nodes-with-attrs [sub-graph {:op (str "not-" not-id) :type :not-join}]))
+           (graph/add-nodes-with-attrs [sub-graph {:op (str "not-" not-id) :type :not-join}]))
        (eduction
         (map-indexed (fn [idx var]
                        [var sub-graph {:label [:arg idx]}])) vars))
