@@ -134,7 +134,8 @@
   ([q]
    (analyze q []))
   ([q rules]
-   (let [rule-data (ds.p/parse-rules rules)
+   (let [query (ds.p/parse-query q)
+         rule-data (ds.p/parse-rules rules)
          rule-graphs (reduce
                       (fn [graphs rule]
                         (let [rule-name (get-val (:name rule))
@@ -182,7 +183,6 @@
                                   :required-vars (reduce into #{} (eduction (map :required-args) branches))})))
                       {}
                       rule-data)
-         query (ds.p/parse-query q)
          inputs (let [vars (transient [])]
                   (walk/postwalk
                    #(condp = (type %)

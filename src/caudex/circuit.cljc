@@ -15,9 +15,9 @@
 #_(defn- get-root [circuit]
   (some #(when (= :root (dbsp/-get-op-type %)) %) (graph/nodes circuit)))
 
-(defn- find-starting-node
+(defn- find-starting-nodes
   ([graph]
-   (find-starting-node graph (graph/nodes graph)))
+   (find-starting-nodes graph (graph/nodes graph)))
   ([graph nodes]
    (let [pattern-nodes
          (into #{}
@@ -27,15 +27,18 @@
                                (graph/out-edges graph %))))
                nodes)]
      (or
-      (some (fn [node]
-              (when (and (contains? pattern-nodes node)
-                         (or (= 0 (graph/in-degree graph node))
-                             (nil? (some #(when (= :pattern (graph/attr graph % :clause-type))
-                                            %)
-                                         (graph/in-edges graph node)))))
-                node))
-            nodes)
-      (first pattern-nodes)))))
+      (when-let [nodes
+                 (seq
+                  (filterv
+                   (fn [node]
+                     (and (contains? pattern-nodes node)
+                          (or (= 0 (graph/in-degree graph node))
+                              (nil? (some #(when (= :pattern (graph/attr graph % :clause-type))
+                                             %)
+                                          (graph/in-edges graph node))))))
+                   nodes))]
+        nodes)
+      [(first pattern-nodes)]))))
 
 (defn- add-op-inputs [circuit op & inputs]
   (reduce
@@ -125,12 +128,13 @@
 
 
 (defn- join-pattern-clauses [circuit query-graph root input-op-map]
-  (let [start (find-starting-node query-graph)
+  (let [starting-nodes (find-starting-nodes query-graph)
         pattern-edges #(filterv
                         (fn [e] (= :pattern (graph/attr query-graph e :clause-type)))
                         (graph/out-edges query-graph %))
-        var? #(and (symbol? %) (not= '_ %))]
-    (loop [processed [] queue (pattern-edges start) ret circuit]
+        var? #(and (symbol? %) (not= '_ %))
+        q (mapcat pattern-edges starting-nodes)]
+    (loop [processed [] queue q ret circuit]
       (let [[ret ops nodes edges last-op]
             (reduce
              (fn [[r ops nodes edges] {:keys [src dest] :as edge}]
@@ -153,13 +157,13 @@
                      (some #(let [vars (dbsp/-get-output-type %)]
                               (when (seq (set/intersection (set vars) (set output-type)))
                                 %))
-                           processed)
+                           (into processed ops))
                      [ret last-op] (cond->
-                                       (-> r
-                                           (graph/add-nodes op)
-                                           (add-op-inputs op root))
-                                       (some? prev-op) (join-ops op prev-op)
-                                       (nil? prev-op) (vector op))
+                                    (-> r
+                                        (graph/add-nodes op)
+                                        (add-op-inputs op root))
+                                     (some? prev-op) (join-ops op prev-op)
+                                     (nil? prev-op) (vector op))
                      [ret last-op] (join-with-inputs ret last-op input-op-map)]
                  [ret
                   (conj ops op)

@@ -16,4 +16,5 @@
  {:caudex {:target :browser
            :modules {:main {:entries [caudex.core]}}
            :compiler-options {:warnings {:invalid-arithmetic false}}
-           :devtools {:preloads [flow-storm.preload]}}}}
+           :devtools {:preloads [flow-storm.preload]}
+           :release {:compiler-options {:optimizations :simple}}}}}
