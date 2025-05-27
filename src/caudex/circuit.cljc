@@ -127,60 +127,62 @@
       input-op-map))))
 
 
-(defn- join-pattern-clauses [circuit query-graph root input-op-map]
-  (let [starting-nodes (find-starting-nodes query-graph)
-        pattern-edges #(filterv
-                        (fn [e] (= :pattern (graph/attr query-graph e :clause-type)))
-                        (graph/out-edges query-graph %))
-        var? #(and (symbol? %) (not= '_ %))
-        q (mapcat pattern-edges starting-nodes)]
-    (loop [processed [] queue q ret circuit]
-      (let [[ret ops nodes edges last-op]
-            (reduce
-             (fn [[r ops nodes edges] {:keys [src dest] :as edge}]
-               (let [attr (graph/attr query-graph edge :label)
-                     conds
-                     (cond-> []
-                       (not (symbol? src)) (conj [= (dbsp/->ValIndex 0) src])
-                       (not (symbol? attr)) (conj [= (dbsp/->ValIndex 1) attr])
-                       (not (symbol? dest)) (conj [= (dbsp/->ValIndex 2) dest]))
-                     selections
-                     (cond-> []
-                       (var? src) (conj (dbsp/->ValIndex 0))
-                       (var? attr) (conj (dbsp/->ValIndex 1))
-                       (var? dest) (conj (dbsp/->ValIndex 2)))
-                     output-type (filterv var? [src attr dest])
-                     op (dbsp/->FilterOperator
-                         (gensym "datom-") [src attr dest] conds selections)
+ (defn- join-pattern-clauses [circuit query-graph root input-op-map]
+   (let [starting-nodes (find-starting-nodes query-graph)
+         pattern-edges #(filterv
+                         (fn [e] (= :pattern (graph/attr query-graph e :clause-type)))
+                         (graph/out-edges query-graph %))
+         var? #(and (symbol? %) (not= '_ %))
+         q (mapcat pattern-edges starting-nodes)]
+     (loop [processed [] queue q ret circuit]
+       (let [[ret ops nodes edges last-op]
+             (reduce
+              (fn [[r ops nodes edges last-op] {:keys [src dest] :as edge}]
+                (let [attr (graph/attr query-graph edge :label)
+                      conds
+                      (cond-> []
+                        (not (symbol? src)) (conj [= (dbsp/->ValIndex 0) src])
+                        (not (symbol? attr)) (conj [= (dbsp/->ValIndex 1) attr])
+                        (not (symbol? dest)) (conj [= (dbsp/->ValIndex 2) dest]))
+                      selections
+                      (cond-> []
+                        (var? src) (conj (dbsp/->ValIndex 0))
+                        (var? attr) (conj (dbsp/->ValIndex 1))
+                        (var? dest) (conj (dbsp/->ValIndex 2)))
+                      output-type (filterv var? [src attr dest])
+                      op (dbsp/->FilterOperator
+                          (gensym "datom-") [src attr dest] conds selections)
                      ;; Join with previously processed op that has a common var
-                     prev-op
-                     (some #(let [vars (dbsp/-get-output-type %)]
-                              (when (seq (set/intersection (set vars) (set output-type)))
-                                %))
-                           (into processed ops))
-                     [ret last-op] (cond->
-                                    (-> r
-                                        (graph/add-nodes op)
-                                        (add-op-inputs op root))
-                                     (some? prev-op) (join-ops op prev-op)
-                                     (nil? prev-op) (vector op))
-                     [ret last-op] (join-with-inputs ret last-op input-op-map)]
-                 [ret
-                  (conj ops op)
-                  (conj nodes dest)
-                  (conj edges edge)
-                  last-op]))
-             [ret [] [] #{} nil]
-             queue)
-            queue (into [] (comp
-                            (map #(pattern-edges %))
-                            cat
-                            (filter #(not (contains? edges %))))
-                        nodes)
-            processed (into processed ops)]
-        (if (seq queue)
-          (recur processed queue ret)
-          [ret last-op])))))
+                      prev-op
+                      (some #(let [vars (dbsp/-get-output-type %)]
+                               (when (seq (set/intersection (set vars) (set output-type)))
+                                 %))
+                            (if (some? last-op)
+                             (into [last-op] (into ops processed))
+                             (into ops processed)))
+                      [ret last-op] (cond->
+                                     (-> r
+                                         (graph/add-nodes op)
+                                         (add-op-inputs op root))
+                                      (some? prev-op) (join-ops op prev-op)
+                                      (nil? prev-op) (vector op))
+                      [ret last-op] (join-with-inputs ret last-op input-op-map)]
+                  [ret
+                   (conj ops op)
+                   (conj nodes dest)
+                   (conj edges edge)
+                   last-op]))
+              [ret [] [] #{} nil]
+              queue)
+             queue (into [] (comp
+                             (map #(pattern-edges %))
+                             cat
+                             (filter #(not (contains? edges %))))
+                         nodes)
+             processed (into processed ops)]
+         (if (seq queue)
+           (recur processed queue ret)
+           [ret last-op])))))
 
 (defn- process-fn|pred [circuit type args last-op query-graph node input-op-map]
   (let [o-type (when (some? last-op)
@@ -307,7 +309,8 @@
       [circuit input-op]
       nodes)))
 
- (defn- build-circuit*
+
+(defn- build-circuit*
   ([inputs query-graph rules]
    (build-circuit* inputs query-graph rules nil))
   ([inputs query-graph rules input-op-map & {:keys [join-unconnected?] :or {join-unconnected? false}}]
@@ -343,7 +346,7 @@
          [circuit last-op] (join-pattern-clauses circuit query-graph root input-op-map)
          [circuit last-op] (process-non-pattern-clauses circuit last-op query-graph rules input-op-map)
          loners (graph/loners circuit)]
-     ;(prn (utils/datafy-circuit circuit))
+                                        ;(prn (utils/datafy-circuit circuit))
      (if (and join-unconnected? (seq loners))
        (reduce
         (fn [[c op] op-2]
@@ -354,7 +357,8 @@
          loners))
        [circuit last-op]))))
 
- (defn build-circuit
+
+(defn build-circuit
   ([query]
    (build-circuit query []))
   ([query rules]
@@ -367,7 +371,7 @@
                      []
                      (mapv #(find-val-idx last-op %) proj-vars))
          c (add-op-inputs circuit projection last-op)]
-      ;(utils/prn-graph c)
+                                        ;(utils/prn-graph c)
      c)))
 
 

@@ -156,8 +156,11 @@
   ((if stratify? stratified-topsort topsort)
    circuit
    (assoc opts :visited-check-fn
-          (fn [dep _node]
-            (= :delay (-> dep op->edn :type))))))
+          (fn [dep node]
+            ;; Special handling for delay feedback loop
+            ;; The delay should not count as a hard dependency
+            (and (= :delay (-> dep op->edn :type))
+                 (some? (graph/find-edge circuit node dep)))))))
 
 (defn topsort-query-graph [query-graph & {:keys [stratify?] :as opts}]
   ((if stratify? stratified-topsort topsort)
