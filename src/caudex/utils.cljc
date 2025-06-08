@@ -75,7 +75,7 @@
                                       :to (display-node g  (:dest %))
                                       :label (str (get-in (:attrs g) [(:id %) :label]))))
                       (graph/edges g))}
-        :flags #{:directed} :default-attributes {:edge {:label "label"}}))
+        :flags #{:directed} :default-attributes {:edge {:label "label"}} :layout-algorithm :neato))
       :cljs (let [ids (into {} (map-indexed #(vector (:id %2) [%1 %2]) (graph/nodes g)))
                   nodes (apply array (mapv #(js-obj "id" (first (get ids (:id %)))
                                                     "label" (display-node g (second (get ids (:id %)))))
@@ -104,10 +104,9 @@
                               (remove #(contains? (set queue) %))
                               (filter #(every?
                                         (fn [in]
-                                          (if visited-check-fn
-                                            (or (contains? visited (:src in))
-                                                (visited-check-fn (:src in) %))
-                                            (contains? visited (:src in))))
+                                          (or (contains? visited (:src in))
+                                              (and (fn? visited-check-fn)
+                                                   (visited-check-fn (:src in) %))))
                                         (graph/in-edges circuit %))))
                         (graph/out-edges circuit cur))]
         (if (seq queue)
@@ -134,10 +133,9 @@
                    (remove #(contains? (set queue) %))
                    (filter #(every?
                              (fn [in]
-                               (if visited-check-fn
-                                 (or (contains? visited (:src in))
-                                     (visited-check-fn (:src in) %))
-                                 (contains? visited (:src in))))
+                               (or (contains? visited (:src in))
+                                   (and (fn? visited-check-fn)
+                                        (visited-check-fn (:src in) %))))
                              (graph/in-edges circuit %))))
                   (completing conj)
                   []
@@ -159,7 +157,7 @@
           (fn [dep node]
             ;; Special handling for delay feedback loop
             ;; The delay should not count as a hard dependency
-            (and (= :delay (-> dep op->edn :type))
+            (and (#{:delay :delay-feedback} (-> dep op->edn :type))
                  (some? (graph/find-edge circuit node dep)))))))
 
 (defn topsort-query-graph [query-graph & {:keys [stratify?] :as opts}]

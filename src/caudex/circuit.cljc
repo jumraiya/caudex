@@ -52,9 +52,9 @@
     (join-ops circuit op-1 op-2 false))
    ([circuit op-1 op-2 inverse?]
     (let [add-1 (dbsp/->AddOperator (gensym "add-") (dbsp/-get-output-type op-1))
-          delay-1 (dbsp/->DelayOperator (gensym "delay-") (dbsp/-get-output-type op-1))
+          delay-1 (dbsp/->DelayFeedbackOperator (gensym "delay-feedback-") (dbsp/-get-output-type op-1))
           add-2 (dbsp/->AddOperator (gensym "add-") (dbsp/-get-output-type op-2))
-          delay-2 (dbsp/->DelayOperator (gensym "delay-") (dbsp/-get-output-type op-2))
+          delay-2 (dbsp/->DelayFeedbackOperator (gensym "delay-feedback-") (dbsp/-get-output-type op-2))
           constraints (dbsp/-get-join-constraints
                        (dbsp/-get-output-type op-1) (dbsp/-get-output-type op-2))
           constraints (if inverse?
@@ -252,62 +252,62 @@
    [circuit {}]
    inputs))
 
- (defn- process-non-pattern-clauses
-   "Processes non datom clauses, all required inputs are joined into a single operator"
-   [circuit input-op query-graph rules input-op-map]
-   (let [nodes (filterv
-                #(contains? #{:or-join :not-join :pred :fn :rule}
-                            (graph/attr query-graph % :type))
-                (utils/topsort-query-graph query-graph))]
-     (reduce
-      (fn [[circuit last-op] node]
-        (let [args (sort-by
-                    second
-                    (into []
-                          (comp
-                           (filter #(= :arg (first (graph/attr query-graph % :label))))
-                           (map #(vector (:src %) (second (graph/attr query-graph % :label)) (graph/attr query-graph % :required?))))
-                          (graph/in-edges query-graph node)))]
-          (case (graph/attr query-graph node :type)
-            (:pred :fn)
-            (process-fn|pred circuit (graph/attr query-graph node :type) args last-op query-graph node input-op-map)
-            :not-join (let [[circuit input-ops] (mk-input-ops circuit last-op args input-op-map)
-                            [sub-circuit] (build-circuit* (mapv first args) node rules input-ops)
-                            [circuit not-join-last-op] (merge-sub-circuit circuit sub-circuit args)]
-                        (if (some? last-op)
-                          (join-ops circuit not-join-last-op last-op true)
-                          (let [neg-op (dbsp/->NegOperator
-                                        (gensym "neg-")
-                                        (dbsp/-get-output-type not-join-last-op))]
-                            [(add-op-inputs circuit neg-op not-join-last-op) neg-op])))
-            :or-join (let [[circuit input-ops]
-                           (mk-input-ops circuit last-op args input-op-map)
-                           [circuit sub-circuit-outputs]
-                           (reduce
-                            (fn [[circuit acc] cnjn-graph]
-                              (let [sub-circuit
-                                    (first (build-circuit* (mapv first args) cnjn-graph rules input-ops :join-unconnected? true))
-                                    [circuit output] (merge-sub-circuit circuit sub-circuit args)]
-                                [circuit (conj acc output)]))
-                            [circuit []]
-                            (eduction
-                             (filter #(= :conj (graph/attr query-graph % :label)))
-                             (map :dest)
-                             (graph/out-edges query-graph node)))
-                           [circuit or-last-op]
-                           (reduce
-                            (fn [[circuit output] output']
-                              (let [add-op (dbsp/->AddOperator
-                                            (gensym "add-") (dbsp/-get-output-type output))]
-                                [(add-op-inputs circuit add-op output output') add-op]))
-                            [circuit (first sub-circuit-outputs)]
-                            (rest sub-circuit-outputs))]
+(defn- process-non-pattern-clauses
+  "Processes non datom clauses, all required inputs are joined into a single operator"
+  [circuit input-op query-graph rules input-op-map]
+  (let [nodes (filterv
+               #(contains? #{:or-join :not-join :pred :fn :rule}
+                           (graph/attr query-graph % :type))
+               (utils/topsort-query-graph query-graph))]
+    (reduce
+     (fn [[circuit last-op] node]
+       (let [args (sort-by
+                   second
+                   (into []
+                         (comp
+                          (filter #(= :arg (first (graph/attr query-graph % :label))))
+                          (map #(vector (:src %) (second (graph/attr query-graph % :label)) (graph/attr query-graph % :required?))))
+                         (graph/in-edges query-graph node)))]
+         (case (graph/attr query-graph node :type)
+           (:pred :fn)
+           (process-fn|pred circuit (graph/attr query-graph node :type) args last-op query-graph node input-op-map)
+           :not-join (let [[circuit input-ops] (mk-input-ops circuit last-op args input-op-map)
+                           [sub-circuit] (build-circuit* (mapv first args) node rules input-ops)
+                           [circuit not-join-last-op] (merge-sub-circuit circuit sub-circuit args)]
                        (if (some? last-op)
-                         (join-ops circuit or-last-op last-op)
-                         [circuit or-last-op]))
-            [circuit last-op])))
-      [circuit input-op]
-      nodes)))
+                         (join-ops circuit not-join-last-op last-op true)
+                         (let [neg-op (dbsp/->NegOperator
+                                       (gensym "neg-")
+                                       (dbsp/-get-output-type not-join-last-op))]
+                           [(add-op-inputs circuit neg-op not-join-last-op) neg-op])))
+           :or-join (let [[circuit input-ops]
+                          (mk-input-ops circuit last-op args input-op-map)
+                          [circuit sub-circuit-outputs]
+                          (reduce
+                           (fn [[circuit acc] cnjn-graph]
+                             (let [sub-circuit
+                                   (first (build-circuit* (mapv first args) cnjn-graph rules input-ops :join-unconnected? true))
+                                   [circuit output] (merge-sub-circuit circuit sub-circuit args)]
+                               [circuit (conj acc output)]))
+                           [circuit []]
+                           (eduction
+                            (filter #(= :conj (graph/attr query-graph % :label)))
+                            (map :dest)
+                            (graph/out-edges query-graph node)))
+                          [circuit or-last-op]
+                          (reduce
+                           (fn [[circuit output] output']
+                             (let [add-op (dbsp/->AddOperator
+                                           (gensym "add-") (dbsp/-get-output-type output))]
+                               [(add-op-inputs circuit add-op output output') add-op]))
+                           [circuit (first sub-circuit-outputs)]
+                           (rest sub-circuit-outputs))]
+                      (if (some? last-op)
+                        (join-ops circuit or-last-op last-op)
+                        [circuit or-last-op]))
+           [circuit last-op])))
+     [circuit input-op]
+     nodes)))
 
 
 (defn- build-circuit*

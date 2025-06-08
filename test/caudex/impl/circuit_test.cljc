@@ -123,29 +123,39 @@
            [{[1] true [2] true}]
            output)))))
 
-(deftest test-or-join
-  (let [q '[:find ?p ?wall ?dest
-            :where
-            [?p :object/description "player"]
-            [?p :object/location ?loc]
-            (or-join [?loc ?wall ?dest]
-                     (and
-                      [?exit :exit/location-1 ?loc]
-                      [?exit :exit/location-1-wall ?wall]
-                      [?exit :exit/location-2 ?dest])
-                     (and
-                      [?exit :exit/location-2 ?loc]
-                      [?exit :exit/location-2-wall ?wall]
-                      [?exit :exit/location-1 ?dest]))]
-        ccircuit (c/build-circuit q)
-        circuit (impl/reify-circuit ccircuit)
-        tx-data [[1 :object/description "player" 123 true]
-                 [1 :object/location 2 123 true]
-                 [3 :exit/location-1 2 123 true]
-                 [3 :exit/location-1-wall :north 123 true]
-                 [3 :exit/location-2 4 123 true]]
-        circuit (impl/step circuit tx-data)
-        output (impl/get-output-stream circuit)]
-    (is (match?
-         [{[1 :north 4] true}]
-         output))))
+ (deftest test-or-join
+   (let [q '[:find ?p ?wall ?dest
+             :where
+             [?p :object/description "player"]
+             [?p :object/location ?loc]
+             (or-join [?loc ?wall ?dest]
+                      (and
+                       [?exit :exit/location-1 ?loc]
+                       [?exit :exit/location-1-wall ?wall]
+                       [?exit :exit/location-2 ?dest])
+                      (and
+                       [?exit :exit/location-2 ?loc]
+                       [?exit :exit/location-2-wall ?wall]
+                       [?exit :exit/location-1 ?dest]))]
+         ccircuit (c/build-circuit q)
+         circuit (impl/reify-circuit ccircuit)
+         tx-data [[1 :object/description "player" 123 true]
+                  [1 :object/location "room-a" 123 true]
+                  ["exit" :exit/location-1 "room-a" 123 true]
+                  ["exit" :exit/location-1-wall :north 123 true]
+                  ["exit" :exit/location-2 "room-b" 123 true]
+                  ["exit" :exit/location-2-wall :south 123 true]]
+         circuit (impl/step circuit tx-data)
+         output (impl/get-output-stream circuit)
+         tx-data [[1 :object/location "room-b" 124 true]
+                  [1 :object/location "room-a" 124 false]]
+         circuit (impl/step circuit tx-data)
+         output-2 (last (impl/get-output-stream circuit))]
+     (is (match?
+          [{[1 :north "room-b"] true}]
+          output))
+     (is (match?
+          {[1 :north "room-b"] false
+           [1 :south "room-a"] true}
+          output-2))))
+
