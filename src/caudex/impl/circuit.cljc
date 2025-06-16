@@ -40,7 +40,6 @@
        (map-indexed vector)
        (graph/edges circuit)))))
 
-#trace
 (defn- step-op [op streams print?]
   (let [zsets (mapv last streams)
         res (case (dbsp/-get-op-type op)

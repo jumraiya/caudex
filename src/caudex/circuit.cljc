@@ -129,8 +129,7 @@
       (filter #(= 0 (graph/out-degree circuit %)))
       input-op-map))))
 
-#trace
- (defn- join-pattern-clauses* [circuit query-graph root input-op-map]
+(defn- join-pattern-clauses* [circuit query-graph root input-op-map]
    (let [starting-nodes (find-starting-nodes query-graph)
          pattern-edges #(filterv
                          (fn [e] (= :pattern (graph/attr query-graph e :clause-type)))
@@ -249,7 +248,7 @@
                                        indices)]
             [(add-op-inputs circuit op last-op) op]))))
 
-#trace
+
 (defn- mk-input-ops [circuit source inputs input-op-map]
   (reduce
    (fn [[c m] [in _ required?]]
@@ -270,7 +269,7 @@
    [circuit {}]
    inputs))
 
-#trace
+
 (defn- process-non-pattern-clauses
   "Processes non datom clauses, all required inputs are joined into a single operator"
   [circuit input-op query-graph rules input-op-map]
@@ -328,7 +327,7 @@
      [circuit input-op]
      nodes)))
 
-#trace
+
 (defn- build-circuit*
   ([inputs query-graph rules]
    (build-circuit* inputs query-graph rules nil))
@@ -376,7 +375,7 @@
          loners))
        [circuit last-op]))))
 
-#trace
+
 (defn build-circuit
   ([query]
    (build-circuit query []))

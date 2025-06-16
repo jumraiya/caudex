@@ -175,8 +175,9 @@
                  [3 :object/detailed-description "detailed description" 123 true]
                  [3 :object/location 1 123 true]]
         ccircuit (c/build-circuit q)
-        _ (caudex.utils/prn-graph ccircuit)
         circuit (impl/reify-circuit ccircuit)
         circuit (impl/step circuit tx-data)
         output (impl/get-output-stream circuit)]
-    (prn output)))
+    (is (match?
+         [{["object" "detailed description"] true}]
+         output))))
