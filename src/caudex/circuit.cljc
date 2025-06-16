@@ -9,8 +9,11 @@
 
 (defn- find-val-idx [op var]
   (let [idx (.indexOf (dbsp/-to-vector (dbsp/-get-output-type op)) var)]
-    (when (not= -1 idx)
-      (dbsp/->ValIndex idx))))
+    (if (not= -1 idx)
+      (dbsp/->ValIndex idx)
+      (prn (str "Could not find " var " in " (dbsp/-get-output-type op)))
+      ;(throw (Exception. (str "Could not find " var " in " (dbsp/-get-output-type op))))
+      )))
 
 #_(defn- get-root [circuit]
   (some #(when (= :root (dbsp/-get-op-type %)) %) (graph/nodes circuit)))
@@ -126,15 +129,15 @@
       (filter #(= 0 (graph/out-degree circuit %)))
       input-op-map))))
 
-
- (defn- join-pattern-clauses [circuit query-graph root input-op-map]
+#trace
+ (defn- join-pattern-clauses* [circuit query-graph root input-op-map]
    (let [starting-nodes (find-starting-nodes query-graph)
          pattern-edges #(filterv
                          (fn [e] (= :pattern (graph/attr query-graph e :clause-type)))
                          (graph/out-edges query-graph %))
          var? #(and (symbol? %) (not= '_ %))
          q (mapcat pattern-edges starting-nodes)]
-     (loop [processed [] queue q ret circuit]
+     (loop [processed [] queue q ret circuit last-op nil]
        (let [[ret ops nodes edges last-op]
              (reduce
               (fn [[r ops nodes edges last-op] {:keys [src dest] :as edge}]
@@ -172,7 +175,7 @@
                    (conj nodes dest)
                    (conj edges edge)
                    last-op]))
-              [ret [] [] #{} nil]
+              [ret [] [] #{} last-op]
               queue)
              queue (into [] (comp
                              (map #(pattern-edges %))
@@ -181,8 +184,23 @@
                          nodes)
              processed (into processed ops)]
          (if (seq queue)
-           (recur processed queue ret)
+           (recur processed queue ret last-op)
            [ret last-op])))))
+
+(defn- join-pattern-clauses [circuit query-graph root input-op-map]
+  (let [[circuit last-op] (join-pattern-clauses* circuit query-graph root input-op-map)
+        terminal-nodes (remove
+                        #(= (dbsp/-get-id last-op) (dbsp/-get-id %))
+                        (graph/terminal-nodes circuit))]
+    (if (seq terminal-nodes)
+      (reduce
+        (fn [[c op] op-2]
+          (join-ops c op op-2))
+        [circuit last-op]
+        (eduction
+         (remove #(= :root (dbsp/-get-op-type %)))
+         terminal-nodes))
+      [circuit last-op])))
 
 (defn- process-fn|pred [circuit type args last-op query-graph node input-op-map]
   (let [o-type (when (some? last-op)
@@ -231,7 +249,7 @@
                                        indices)]
             [(add-op-inputs circuit op last-op) op]))))
 
-
+#trace
 (defn- mk-input-ops [circuit source inputs input-op-map]
   (reduce
    (fn [[c m] [in _ required?]]
@@ -252,6 +270,7 @@
    [circuit {}]
    inputs))
 
+#trace
 (defn- process-non-pattern-clauses
   "Processes non datom clauses, all required inputs are joined into a single operator"
   [circuit input-op query-graph rules input-op-map]
@@ -309,7 +328,7 @@
      [circuit input-op]
      nodes)))
 
-
+#trace
 (defn- build-circuit*
   ([inputs query-graph rules]
    (build-circuit* inputs query-graph rules nil))
@@ -357,7 +376,7 @@
          loners))
        [circuit last-op]))))
 
-
+#trace
 (defn build-circuit
   ([query]
    (build-circuit query []))
@@ -371,7 +390,6 @@
                      []
                      (mapv #(find-val-idx last-op %) proj-vars))
          c (add-op-inputs circuit projection last-op)]
-                                        ;(utils/prn-graph c)
      c)))
 
 

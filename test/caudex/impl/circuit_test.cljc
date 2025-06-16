@@ -159,3 +159,24 @@
            [1 :south "room-a"] true}
           output-2))))
 
+(deftest test-refs
+  (let [q '[:find ?d ?det
+            :where
+            [?p :object/description "player"]
+            [?p :object/location ?l]
+            [?o :object/description ?d]
+            [?o :object/detailed-description ?det]
+            (or-join [?l ?p ?o]
+                     [?o :object/location ?p]
+                     [?o :object/location ?l])]
+        tx-data [[1 :object/description "player" 123 true]
+                 [1 :object/location 2 123 true]
+                 [3 :object/description "object" 123 true]
+                 [3 :object/detailed-description "detailed description" 123 true]
+                 [3 :object/location 1 123 true]]
+        ccircuit (c/build-circuit q)
+        _ (caudex.utils/prn-graph ccircuit)
+        circuit (impl/reify-circuit ccircuit)
+        circuit (impl/step circuit tx-data)
+        output (impl/get-output-stream circuit)]
+    (prn output)))

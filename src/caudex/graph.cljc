@@ -120,3 +120,5 @@
             :directed-edges (mapv (fn [{:keys [src dest] :as edge}]
                                     (vector src dest (attrs g edge)))
                                   (edges g))}))
+(defn terminal-nodes [g]
+  (filterv #(= 0 (out-degree g %)) (nodes g)))
