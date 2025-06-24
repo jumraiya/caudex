@@ -150,6 +150,37 @@
          order)))))
 
 
+(defn get-stratified-hierarchy
+   [circuit start]
+   (loop [queue [start] order [[start]] visited #{}]
+     (let [visited (into visited queue)
+           queue (transduce
+                  (comp
+                   (map #(graph/in-edges circuit %))
+                   cat
+                   (map :src)
+                   (remove #(contains? visited %))
+                   (remove #(contains? (set queue) %))
+                   (filter #(every?
+                             (fn [in]
+                               (or (contains? visited (:dest in))
+                                   (and (#{:delay :delay-feedback}
+                                         (-> (:dest in) op->edn :type))
+                                        (some? (graph/find-edge circuit % (:dest in))))))
+                             (graph/out-edges circuit %))))
+                  (completing conj)
+                  []
+                  queue)
+           order (if (seq queue)
+                   (conj order queue)
+                   order)]
+       (if (seq queue)
+         (recur queue
+                order
+                visited)
+         order))))
+
+
 (defn topsort-circuit [circuit & {:keys [stratify?] :as opts}]
   ((if stratify? stratified-topsort topsort)
    circuit
@@ -175,3 +206,30 @@
 (defn datafy-circuit [circuit]
   (mapv #(mapv datafy %)
         (topsort-circuit circuit :stratify? true)))
+
+ 
+
+#_(defn get-heirarchy [circuit op-id]
+    (let [           ;strata (topsort-circuit circuit :stratify? true)
+          parents (loop [parents (mapv
+                                  :src
+                                  (graph/in-edges
+                                   circuit
+                                   (some #(when (= op-id (dbsp/-get-id %))
+                                            %)
+                                         (graph/nodes circuit))))
+                         t 0]
+                    (let [parents (into parents queue)]
+                      (prn (mapv #(dbsp/-get-id %) parents))
+                      (if-let [new-edges (and
+                                          (< t 5)
+                                          (seq (into []
+                                                     (comp
+                                                      (map #(graph/in-edges circuit %))
+                                                      cat
+                                                      (remove #(= :delay-feedback
+                                                                  (dbsp/-get-op-type (:src %)))))
+                                                     queue)))]
+                        (recur parents new-edges (inc t))
+                        parents)))]
+      parents))

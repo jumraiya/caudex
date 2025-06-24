@@ -40,6 +40,17 @@
        (map-indexed vector)
        (graph/edges circuit)))))
 
+(defn- add-zsets [zset-1 zset-2]
+  (reduce
+   (fn [set-1 row]
+     (if (contains? set-1 (key row))
+       (if (not= (get set-1 (key row)) (val row))
+         (dissoc set-1 (key row))
+         set-1)
+       (conj set-1 row)))
+   zset-1
+   zset-2))
+
 (defn- step-op [op streams print?]
   (let [zsets (mapv last streams)
         res (case (dbsp/-get-op-type op)
@@ -67,8 +78,9 @@
                                   [(conj row res) add?])))
                          (first zsets))
               :neg (update-vals (first zsets) not)
-              :delay (-> streams first butlast last)
+              :delay (or (-> streams first butlast last) {})
               :delay-feedback (first zsets)
+              :integrate (add-zsets (or (-> streams first butlast last) {}) (first zsets))
               :join (into {}
                           (for [row-1 (first zsets) row-2 (second zsets)
                                 :when (or (empty? (:join-conds op))
@@ -76,17 +88,7 @@
                                            #(dbsp/-satisfies? % (into (key row-1) (key row-2)))
                                            (:join-conds op)))]
                             [(into (key row-1) (key row-2)) (and (val row-1) (val row-2))]))
-              :add (reduce
-                    (fn [set-1 row]
-                      (when (= row [1 "room-a"])
-                        (prn set-1))
-                      (if (contains? set-1 (key row))
-                        (if (not= (get set-1 (key row)) (val row))
-                          (dissoc set-1 (key row))
-                          set-1)
-                        (conj set-1 row)))
-                    (first zsets)
-                    (second zsets)))]
+              :add (add-zsets (first zsets) (second zsets)))]
     (when print?
       (prn (str "(" (:id op) " " (clojure.string/join " " (mapv #(with-out-str (clojure.pprint/pprint %)) zsets)) ") -> " res)))
     res))

@@ -140,6 +140,13 @@
   (-get-input-types [_] [input-type])
   (-get-output-type [_] input-type))
 
+(defrecord IntegrationOperator [id input-type]
+  Operator
+  (-get-id [_] id)
+  (-get-op-type [_] :integrate)
+  (-get-input-types [_] [input-type])
+  (-get-output-type [_] input-type))
+
 ;; Represents a cartesian product of two zset types. May be conditional or unconditional
 (defrecord JoinOperator [id input-type-1 input-type-2 join-conds]
   Operator
@@ -173,6 +180,8 @@
   DelayOperator
   (datafy [this] (datafy-op this))
   DelayFeedbackOperator
+  (datafy [this] (datafy-op this))
+  IntegrationOperator
   (datafy [this] (datafy-op this))
   JoinOperator
   (datafy [this] (datafy-op this))

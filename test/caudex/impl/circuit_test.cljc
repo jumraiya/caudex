@@ -7,30 +7,34 @@
             [caudex.utils :as utils]))
 
 
+
+
+(deftest simple-join
+  (let [q '[:find ?a ?b
+            :where
+            [?a :attr-1 ?b]
+            [?b :attr-2 12]]
+        circuit (impl/reify-circuit (c/build-circuit q))
+        tx-data [[1 :attr-1 2 123 true]
+                 [2 :attr-2 12 123 true]
+                 [3 :attr-1 4 123 true]
+                 [4 :attr-2 10 123 true]]
+        circuit (impl/step circuit tx-data)
+        output-1 (last (impl/get-output-stream circuit))
+        circuit (impl/step circuit [[2 :attr-2 12 124 false]
+                                    [2 :attr-2 13 124 false]
+                                    [4 :attr-2 12 124 true]])
+        output-2 (last (impl/get-output-stream circuit))]
+    (is (match?
+         {[1 2] true}
+         output-1))
+    (is (match?
+         {[1 2] false
+          [3 4] true}
+         output-2))))
+
+
 (deftest test-reify+step-circuit
-  (testing "Simple Join"
-    (let [q '[:find ?a ?b
-              :where
-              [?a :attr-1 ?b]
-              [?b :attr-2 12]]
-          circuit (impl/reify-circuit (c/build-circuit q))
-          tx-data [[1 :attr-1 2 123 true]
-                   [2 :attr-2 12 123 true]
-                   [3 :attr-1 4 123 true]
-                   [4 :attr-2 10 123 true]]
-          circuit (impl/step circuit tx-data)
-          output-1 (last (impl/get-output-stream circuit))
-          circuit (impl/step circuit [[2 :attr-2 12 124 false]
-                                      [2 :attr-2 13 124 false]
-                                      [4 :attr-2 12 124 true]])
-          output-2 (last (impl/get-output-stream circuit))]
-      (is (match?
-           {[1 2] true}
-           output-1))
-      (is (match?
-           {[1 2] false
-            [3 4] true}
-           output-2))))
 
   (testing "Simple Join with inputs"
     (let [q '[:find ?a ?b
@@ -170,14 +174,50 @@
                      [?o :object/location ?p]
                      [?o :object/location ?l])]
         tx-data [[1 :object/description "player" 123 true]
-                 [1 :object/location 2 123 true]
                  [3 :object/description "object" 123 true]
                  [3 :object/detailed-description "detailed description" 123 true]
-                 [3 :object/location 1 123 true]]
+                 [3 :object/location 2 123 true]]
         ccircuit (c/build-circuit q)
         circuit (impl/reify-circuit ccircuit)
         circuit (impl/step circuit tx-data)
-        output (impl/get-output-stream circuit)]
+        circuit (impl/step circuit [[1 :object/location 2 123 true]])
+        output (impl/get-output-stream circuit)
+        ;; tx-data [[1 :object/location 4 124 true]
+        ;;          [1 :object/location 2 124 false]]
+        ;; circuit (impl/step circuit tx-data)
+        ;; output-2 (impl/get-output-stream circuit)
+        ]
     (is (match?
          [{["object" "detailed description"] true}]
-         output))))
+         output))
+    #_(is (match?
+         {["object" "detailed description"] false}
+         (last output-2)))))
+
+(deftest test-refs-2
+  (let [q '[:find ?desc
+            :where
+            [?p :object/description "player"]
+            [?p :object/location ?loc]
+            [?loc :location/description ?desc]]
+        tx-data [[1 :object/description "player" 123 true]
+                 [2 :location/description "room-1" 123 true]
+                 [3 :location/description "room-2" 123 true]]
+        ccircuit (c/build-circuit q)
+        circuit (impl/reify-circuit ccircuit)
+        circuit (impl/step circuit tx-data)
+        circuit (impl/step circuit [[1 :object/location 2 124 true]])
+        output (impl/get-output-stream circuit)
+        circuit (impl/step circuit
+                           [[1 :object/location 2 125 false]
+                            [1 :object/location 3 125 true]])
+        output-2 (impl/get-output-stream circuit)]
+    (caudex.utils/prn-graph ccircuit)
+    (caudex.impl.circuit/prn-circuit circuit)
+    (is (match?
+         {["room-1"] true}
+         (last output)))
+    (is (match?
+         {["room-1"] false
+          ["room-2"] true}
+         (last output-2)))))
