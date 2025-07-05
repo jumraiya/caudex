@@ -15,8 +15,14 @@
   (when (is-op? op)
     {:id (dbsp/-get-id op)
      :type (dbsp/-get-op-type op)
-     :inputs (dbsp/-get-input-types op)
-     :output (dbsp/-get-output-type op)}))
+     :inputs (try
+               (dbsp/-get-input-types op)
+               (catch Exception ex
+                 "error"))
+     :output (try
+               (dbsp/-get-output-type op)
+               (catch Exception ex
+                 "error"))}))
 
 
 (defn get-root-node [graph]

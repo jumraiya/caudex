@@ -210,31 +210,32 @@
       :graph graph})))
 
  (defn- process-or-join [{:keys [graph rule-defs]} {:keys [rule-vars clauses]} counters]
-  (let [vars (into #{} (map :symbol (:free rule-vars)))
-        or-id (get counters :or 0)
-        or-node (str "or-" or-id)
-        graph (reduce
-               #(graph/add-directed-edges %1 %2)
-               (-> graph
-                   (graph/add-nodes-with-attrs [or-node {:type :or-join}]))
-               (eduction (map-indexed (fn [idx var]
-                                        [var or-node {:label [:arg idx]}])) vars))
-        counters (assoc counters :or (inc or-id))
-        [graph counters]
-        (reduce
-         (fn [[graph counters] clause]
-           (let [new-graph (condp = (type clause)
-                             datascript.parser.And
-                             (build-query-graph vars (:clauses clause) rule-defs)
-                             (build-query-graph vars [clause] rule-defs))
-                 conj-id (get counters :conj 0)]
-             [(-> graph
-                  (graph/add-nodes-with-attrs [new-graph {:op (str "conj-" conj-id)}])
-                  (graph/add-directed-edges [or-node new-graph {:label :conj}]))
-              (update counters :conj #(inc (or % 0)))]))
+   (let [vars (into #{} (map :symbol (:free rule-vars)))
+         or-id (get counters :or 0)
+         or-node (str "or-" or-id)
+         graph (reduce
+                #(graph/add-directed-edges %1 %2)
+                (-> graph
+                    (graph/add-nodes-with-attrs [or-node {:type :or-join}]))
+                (eduction (map-indexed (fn [idx var]
+                                         [var or-node {:label [:arg idx]}])) vars))
+         counters (assoc counters :or (inc or-id))
          [graph counters]
-         clauses)]
-    [(mark-required-vars graph or-node vars) counters]))
+         (reduce
+          (fn [[graph counters] clause]
+            (let [new-graph (condp = (type clause)
+                              datascript.parser.And
+                              (build-query-graph vars (:clauses clause) rule-defs)
+                              (build-query-graph vars [clause] rule-defs))
+                  new-graph (apply graph/remove-nodes (into [new-graph] (graph/loners new-graph)))
+                  conj-id (get counters :conj 0)]
+              [(-> graph
+                   (graph/add-nodes-with-attrs [new-graph {:op (str "conj-" conj-id)}])
+                   (graph/add-directed-edges [or-node new-graph {:label :conj}]))
+               (update counters :conj #(inc (or % 0)))]))
+          [graph counters]
+          clauses)]
+     [(mark-required-vars graph or-node vars) counters]))
 
 (defn- process-not-join [{:keys [graph rule-defs]} {:keys [vars clauses]} counters]
   (let [vars (into #{} (map :symbol vars))

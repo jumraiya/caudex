@@ -80,7 +80,7 @@
               :neg (update-vals (first zsets) not)
               :delay (or (-> streams first butlast last) {})
               :delay-feedback (first zsets)
-              :integrate (add-zsets (or (-> streams first butlast last) {}) (first zsets))
+              :integrate (add-zsets (first zsets) (or (second zsets) {}))
               :join (into {}
                           (for [row-1 (first zsets) row-2 (second zsets)
                                 :when (or (empty? (:join-conds op))
@@ -101,6 +101,10 @@
      (fn [{:keys [streams op-stream-map] :as data} op]
        (let [{:keys [inputs outputs]} (get op-stream-map (dbsp/-get-id op))
              input-streams (mapv #(get streams %) (vals inputs))
+             input-streams (if (= (dbsp/-get-op-type op) :integrate)
+                             (conj input-streams
+                                   (get streams (first outputs)))
+                             input-streams)
              new-val (step-op op input-streams print?)]
          (update data :streams
                  (fn [s]

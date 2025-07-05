@@ -83,7 +83,7 @@
                g))))
 
 (defn remove-nodes [graph & nodes]
-  #?(:clj (uber/remove-nodes graph nodes)
+  #?(:clj (apply uber/remove-nodes (into [graph] nodes))
      :cljs (apply loom/remove-nodes (into [graph] nodes))))
 
 (defn add-nodes [graph & nodes]
