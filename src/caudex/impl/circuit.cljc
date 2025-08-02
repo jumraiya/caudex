@@ -14,31 +14,32 @@
 (defn- is-idx? [v]
   (= caudex.dbsp.ValIndex (type v)))
 
- (defn reify-circuit
-   "Constructs a map representing a circuit along with it's step order"
-   [circuit]
-   (let [order (utils/topsort-circuit circuit)
-         root (some #(when (= :root (dbsp/-get-op-type %)) %) (graph/nodes circuit))
-         last-op (last order)]
-     (reduce
-      (fn [g [idx {:keys [src dest] :as e}]]
-        (let [arg-idx (graph/attr circuit e :arg)]
-          (-> g
-              (assoc-in [:streams idx] [])
-              (update :op-stream-map
-                      (fn [m]
-                        (-> m
-                            (update-in [(dbsp/-get-id src) :outputs] #(conj (or % []) idx))
-                            (update-in [(dbsp/-get-id dest) :inputs]
-                                       #(assoc (or % (sorted-map)) arg-idx idx))))))))
-      {:t 0
-       :streams {-1 [] -2 []}
-       :op-stream-map {(dbsp/-get-id root) {:inputs (sorted-map 0 -1) :outputs []}
-                       (dbsp/-get-id last-op) {:outputs [-2]}}
-       :order order}
-      (eduction
-       (map-indexed vector)
-       (graph/edges circuit)))))
+#trace
+(defn reify-circuit
+  "Constructs a map representing a circuit along with it's step order"
+  [circuit]
+  (let [order (utils/topsort-circuit circuit)
+        root (some #(when (= :root (dbsp/-get-op-type %)) %) (graph/nodes circuit))
+        last-op (last order)]
+    (reduce
+     (fn [g [idx {:keys [src dest] :as e}]]
+       (let [arg-idx (graph/attr circuit e :arg)]
+         (-> g
+             (assoc-in [:streams idx] [])
+             (update :op-stream-map
+                     (fn [m]
+                       (-> m
+                           (update-in [(dbsp/-get-id src) :outputs] #(conj (or % []) idx))
+                           (update-in [(dbsp/-get-id dest) :inputs]
+                                      #(assoc (or % (sorted-map)) arg-idx idx))))))))
+     {:t 0
+      :streams {-1 [] -2 []}
+      :op-stream-map {(dbsp/-get-id root) {:inputs (sorted-map 0 -1) :outputs []}
+                      (dbsp/-get-id last-op) {:outputs [-2]}}
+      :order order}
+     (eduction
+      (map-indexed vector)
+      (graph/edges circuit)))))
 
 (defn- add-zsets [zset-1 zset-2]
   (reduce
@@ -51,47 +52,67 @@
    zset-1
    zset-2))
 
-(defn- step-op [op streams print?]
-  (let [zsets (mapv last streams)
-        res (case (dbsp/-get-op-type op)
-              :root (tx-data->zset (first zsets))
-              :filter (into {}
-                            (comp
-                             (filter (fn [[row]]
-                                       (every?
-                                        #(dbsp/-satisfies? % row)
-                                        (:filters op))))
-                             (map (fn [[k v]]
-                                    (if (seq (:projections op))
-                                      [(mapv #(nth k (:idx %)) (:projections op))
-                                       v]
-                                      [k v]))))
-                            (first zsets))
-              :map (into {}
-                         (map (fn [[row add?]]
-                                (let [args (into []
-                                                 (map #(if (is-idx? %)
-                                                         (nth row (:idx %))
-                                                         %))
-                                                 (:args op))
-                                      res (apply (:mapping-fn op) args)]
-                                  [(conj row res) add?])))
-                         (first zsets))
-              :neg (update-vals (first zsets) not)
-              :delay (or (-> streams first butlast last) {})
-              :delay-feedback (first zsets)
-              :integrate (add-zsets (first zsets) (or (second zsets) {}))
-              :join (into {}
-                          (for [row-1 (first zsets) row-2 (second zsets)
-                                :when (or (empty? (:join-conds op))
-                                          (every?
-                                           #(dbsp/-satisfies? % (into (key row-1) (key row-2)))
-                                           (:join-conds op)))]
-                            [(into (key row-1) (key row-2)) (and (val row-1) (val row-2))]))
-              :add (add-zsets (first zsets) (second zsets)))]
-    (when print?
-      (prn (str "(" (:id op) " " (clojure.string/join " " (mapv #(with-out-str (clojure.pprint/pprint %)) zsets)) ") -> " res)))
-    res))
+(defn- exec-filter-op [zsets op]
+  (into {}
+        (comp
+         (filter (fn [[row]]
+                   (every?
+                    #(dbsp/-satisfies? % row)
+                    (:filters op))))
+         (map (fn [[k v]]
+                (if (seq (:projections op))
+                  [(mapv #(nth k (:idx %)) (:projections op))
+                   v]
+                  [k v]))))
+        (first zsets)))
+#trace
+ (defn- step-op [op streams print?]
+   (let [zsets (mapv last streams)
+         res (case (dbsp/-get-op-type op)
+               :root (tx-data->zset (first zsets))
+               :filter (exec-filter-op zsets op)
+               :map (into {}
+                          (map (fn [[row add?]]
+                                 (let [args (into []
+                                                  (map #(if (is-idx? %)
+                                                          (nth row (:idx %))
+                                                          %))
+                                                  (:args op))
+                                       indices-used? (some #(when (is-idx? %) %) (:args op))
+                                       res (apply (:mapping-fn op) args)]
+                                   [(if indices-used?
+                                      (conj row res)
+                                     ;; If no indices were used, simply return the result
+                                      [res])
+                                    add?])))
+                          (first zsets))
+               :neg (update-vals (first zsets) not)
+               :delay (or (-> streams first butlast last) {})
+               :delay-feedback (first zsets)
+               :integrate (add-zsets (first zsets) (or (second zsets) {}))
+               :join (into {}
+                           (for [row-1 (first zsets) row-2 (second zsets)
+                                 :when (or (empty? (:join-conds op))
+                                           (every?
+                                            #(dbsp/-satisfies? % (into (key row-1) (key row-2)))
+                                            (:join-conds op)))]
+                             [(into (key row-1) (key row-2)) (and (val row-1) (val row-2))]))
+               :anti-join (first zsets)
+               #_(into {}
+                     (filter (fn [row-1]
+                               (every?
+                                (fn [row-2]
+                                  (not-every?
+                                   #(dbsp/-satisfies?
+                                     %
+                                     (into (key row-1) (key row-2)))
+                                   (:join-conds op)))
+                                (second zsets))))
+                     (first zsets))
+               :add (add-zsets (first zsets) (second zsets)))]
+     (when print?
+       (prn (str "(" (:id op) " " (clojure.string/join " " (mapv #(with-out-str (clojure.pprint/pprint %)) zsets)) ") -> " res)))
+     res))
 
 (defn step
   "Steps through a reified circuit with transaction data, updating stream values and returning a updated circuit"

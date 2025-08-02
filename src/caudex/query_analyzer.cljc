@@ -56,7 +56,7 @@
    (eduction
     (filter #(is-var-required? graph %))
     vars)))
-
+#trace
 (defn- process-fn-clause [{:keys [graph rule-defs]} clause fn-type counters]
   (let [fn-name (if (= fn-type :rule)
                   (-> clause :name get-val str)
@@ -69,7 +69,9 @@
        (fn [g [idx arg]]
          (let [fn-sym (-> clause :fn :symbol)
                f-name (if (#{:fn :pred} fn-type)
-                        #?(:clj (-> fn-sym resolve var-get)
+                        #?(:clj (if-let [f (get d.fns/query-fns fn-sym)]
+                                  f
+                                  (-> fn-sym resolve var-get))
                            :cljs (if-let [f (get d.fns/query-fns fn-sym)]
                                    f
                                    (throw (js/Error. (str "Could not find fn " fn-sym)))))

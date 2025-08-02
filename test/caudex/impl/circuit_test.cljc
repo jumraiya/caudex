@@ -64,8 +64,8 @@
                  [2 :attr-2 12 123 true]
                  [3 :attr-1 11 123 true]
                  [11 :attr-2 10 123 true]]
-        circuit (impl/step circuit tx-data)
-        _ (impl/prn-circuit circuit)
+        circuit (impl/step circuit tx-data :print? true)
+        ;_ (impl/prn-circuit circuit)
         output (impl/get-output-stream circuit)]
     (is (match?
          (m/equals
@@ -167,6 +167,35 @@
          {[1 :north "room-b"] false
           [1 :south "room-a"] true}
          output-2))))
+#trace
+ (deftest test-or-join-3
+   (let [q '[:find ?a ?b
+             :where
+             [?a :attr 10]
+             (or-join [?a ?b]
+                      (and
+                       [?a :attr-2 :asd]
+                       [(ground :branch-1) ?b])
+                      (and
+                       [?a :attr-2 :qwe]
+                       [(ground :branch-2) ?b])
+                      (and
+                       (not-join [?a]
+                                 [?a :attr-2 :asd])
+                       [(ground :branch-3) ?b]))]
+         ccircuit (c/build-circuit q)
+         circuit (impl/reify-circuit ccircuit)
+         circuit (impl/step circuit [[1 :attr 10 123 true]
+                                     [1 :attr-2 :asd 123 true]])
+         output (last (impl/get-output-stream circuit))
+         circuit (impl/step circuit [[2 :attr 10 124 true]])
+         output-2 (last (impl/get-output-stream circuit))]
+     (is (match?
+          {[1 :branch-1] true}
+          output))
+     (is (match?
+          {[2 :branch-3] true}
+          output-2))))
 
 (deftest test-refs
   (let [q '[:find ?d ?det
@@ -211,3 +240,41 @@
           ["object-2" "desc-2"] false}
          (last output-2)))))
 
+(deftest test-not+or-join
+  (let [q '[:find ?dest
+            :where
+            [?p :object/description "player"]
+            [?p :object/location ?loc]
+            [?action :action/type :move]
+            [?action :action/arg ?wall]
+            (or-join [?loc ?wall ?dest ?locked]
+                     (and
+                      [?exit :exit/location-1 ?loc]
+                      [?exit :exit/location-1-wall ?wall]
+                      [?exit :exit/location-2 ?dest]
+                      [?exit :exit/locked? ?locked])
+                     (and
+                      [?exit :exit/location-2 ?loc]
+                      [?exit :exit/location-2-wall ?wall]
+                      [?exit :exit/location-1 ?dest]
+                      [?exit :exit/locked? ?locked]))
+            [(false? ?locked)]]
+        ccircuit (c/build-circuit q)
+        circuit (impl/reify-circuit ccircuit)
+        circuit (impl/step
+                 circuit
+                 [[1 :object/description "player" 123 true]
+                  ["exit" :exit/location-1 "room-a" 123 true]
+                  ["exit" :exit/location-1-wall :north 123 true]
+                  ["exit" :exit/location-2 "room-b" 123 true]
+                  ["exit" :exit/location-2-wall :south 123 true]
+                  ["exit" :exit/locked? false 123 true]])
+        circuit (impl/step circuit [[1 :object/location "room-a" 123 true]])
+        circuit (impl/step
+                 circuit
+                 [["action" :action/type :move 124 true]
+                  ["action" :action/arg :north 124 true]])
+        output (impl/get-output-stream circuit)]
+    ;; (utils/prn-graph ccircuit)
+    ;; (impl/prn-circuit circuit)
+    (prn output)))

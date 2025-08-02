@@ -155,6 +155,15 @@
   (-get-input-types [_] [input-type-1 input-type-2])
   (-get-output-type [_] (-get-joined-type input-type-1 input-type-2)))
 
+;; Similar to Join except each join condition's complement is used for joining
+;; Also results in a join even if the negated input zset is empty
+(defrecord AntiJoinOperator [id input-type]
+  Operator
+  (-get-id [_] id)
+  (-get-op-type [_] :anti-join)
+  (-get-input-types [_] [input-type])
+  (-get-output-type [_] input-type))
+
 (defrecord AddOperator [id input-type]
   Operator
   (-get-id [_] id)
