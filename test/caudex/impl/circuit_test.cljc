@@ -197,6 +197,79 @@
           {[2 :branch-3] true}
           output-2))))
 
+
+(deftest test-or-join-4
+  (let [q '[:find ?dest ?locked
+            :where
+            [?p :object/location ?loc]
+            [?p :last-action/arg ?wall]
+            (or-join [?loc ?wall ?dest ?locked]
+                     (and
+                      [?exit :exit/location-1 ?loc]
+                      [?exit :exit/location-1-wall ?wall]
+                      [?exit :exit/location-2 ?dest]
+                      [?exit :exit/locked? ?locked])
+                     (and
+                      [?exit :exit/location-2 ?loc]
+                      [?exit :exit/location-2-wall ?wall]
+                      [?exit :exit/location-1 ?dest]
+                      [?exit :exit/locked? ?locked])
+                     (and
+                      (not-join [?loc ?wall]
+                                (or-join [?loc ?wall]
+                                 (and
+                                  [?e :exit/location-1 ?loc]
+                                  [?e :exit/location-1-wall ?wall])
+                                 (and
+                                  [?e :exit/location-2 ?loc]
+                                  [?e :exit/location-2-wall ?wall])))
+                      [(ground :not-found) ?dest]
+                      [(ground false) ?locked]))]
+        ccircuit (c/build-circuit q)
+        _ (caudex.utils/prn-graph ccircuit)
+        circuit (impl/reify-circuit ccircuit)
+        circuit (impl/step circuit
+                           [[:exit :exit/location-1 :loc 123 true]
+                            [:exit :exit/location-1-wall :east 123 true]
+                            [:exit :exit/location-2 :loc-2 123 true]
+                            [:exit :exit/location-2-wall :west 123 true]
+                            [:exit :exit/locked? false 123 true]])
+        circuit (impl/step circuit
+                           [[:player :object/location :loc 123 true]
+                            [:player :last-action/arg :north 123 true]]
+                           :print? true)
+        output (last (impl/get-output-stream circuit))]
+    (prn output)))
+
+(deftest test-or-join-3
+  (let [q '[:find ?a ?b
+            :where
+            [?a :attr 10]
+            (or-join [?a ?b]
+                     (and
+                      [?a :attr-2 :asd]
+                      [(ground :branch-1) ?b])
+                     (and
+                      [?a :attr-2 :qwe]
+                      [(ground :branch-2) ?b])
+                     (and
+                      (not-join [?a]
+                                [?a :attr-2 :asd])
+                      [(ground :branch-3) ?b]))]
+        ccircuit (c/build-circuit q)
+        circuit (impl/reify-circuit ccircuit)
+        circuit (impl/step circuit [[1 :attr 10 123 true]
+                                    [1 :attr-2 :asd 123 true]])
+        output (last (impl/get-output-stream circuit))
+        circuit (impl/step circuit [[2 :attr 10 124 true]])
+        output-2 (last (impl/get-output-stream circuit))]
+    (is (match?
+         {[1 :branch-1] true}
+         output))
+    (is (match?
+         {[2 :branch-3] true}
+         output-2))))
+
 (deftest test-refs
   (let [q '[:find ?d ?det
             :where
