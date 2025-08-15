@@ -34,11 +34,12 @@
                (set (dbsp/-get-output-type op-2))))))
 
 ;; op that returns a constant value e.g. [(ground :const) ?c]
-#trace
  (defn- static-op? [circuit op]
    (or
     (and
-     (> (graph/in-degree circuit op) 0)
+     (if-let [degree (graph/in-degree circuit op)]
+      (> degree 0)
+      false)
      (every?
       #(static-op? circuit %)
       (eduction
@@ -142,10 +143,9 @@
                  (dbsp/-get-output-type not-join-op))
         op-vars (-> input-op (dbsp/-get-output-type) (dbsp/-to-vector))
         circuit (add-op-inputs circuit negated not-join-op)
-        join-fn (if (static-op? circuit input-op)
-                  non-integrated-join
-                  join-ops*)
-        [circuit joined-output] (join-fn circuit input-op negated)
+        _ (when (static-op? circuit input-op)
+            (throw (Exception. "Trying to join static op with anti-join")))
+        [circuit joined-output] (join-ops* circuit input-op negated)
         [circuit proj] (project-vars-from-op
                         circuit joined-output op-vars)
         final-add (dbsp/->AddOperator
@@ -155,6 +155,9 @@
 #trace
 (defn- join-ops
   [circuit op-1 op-2]
+  (when (and (= :anti-join (dbsp/-get-op-type op-1))
+             (= :anti-join (dbsp/-get-op-type op-2)))
+    (throw (Exception. "Trying to combine two anti-joins")))
   (let [[anti-join? op-1 op-2]
         (cond
           (= :anti-join (dbsp/-get-op-type op-1)) [true op-2 op-1]
@@ -166,25 +169,84 @@
                     non-integrated-join
                     :else join-ops*)]
     (join-type circuit op-1 op-2)))
+
+(defn- join-ops-seq [circuit ops-seq]
+  (reduce
+   (fn [[c op] op-2]
+     (join-ops c op op-2))
+   [circuit (first ops-seq)]
+   (eduction
+    (remove #(= :root (dbsp/-get-op-type %)))
+    (rest ops-seq))))
+
 #trace
-(defn- consolidate-frontier
-  [circuit frontier]
-  (loop [circuit circuit frontier frontier]
-    (if-let [overlapping-pair (some (fn [op1]
-                                      (some (fn [op2]
-                                              (when (and (not= op1 op2)
-                                                         (or (ops-overlap? op1 op2)
-                                                             (static-op? circuit op2)))
-                                                [op1 op2]))
-                                            frontier))
-                                    frontier)]
-      (let [[op1 op2] overlapping-pair
-            [updated-circuit joined-op] (join-ops circuit op1 op2)
-            updated-frontier (-> frontier
-                                 (disj op1 op2)
-                                 (conj joined-op))]
-        (recur updated-circuit updated-frontier))
-      [circuit frontier])))
+ (defn- consolidate-frontier
+   [circuit frontier]
+   (let [static-ops (filterv (partial static-op? circuit) frontier)
+         [circuit frontier] (if (> (count static-ops) 1)
+                              (let [[circuit op] (join-ops-seq circuit static-ops)]
+                                [circuit
+                                 (-> (reduce disj frontier static-ops)
+                                     (conj op))])
+                              [circuit frontier])
+         anti-joins (filterv #(= :anti-join (dbsp/-get-op-type %)) frontier)
+         [circuit frontier] (if (seq anti-joins)
+                              (reduce
+                               (fn [[circuit frontier] anti-join-op]
+                                 (let [input-ops (filterv #(and (not= :anti-join (dbsp/-get-op-type %))
+                                                                (ops-overlap? % anti-join-op))
+                                                          frontier)]
+                                   (if (seq input-ops)
+                                     (let [[circuit input-op] (join-ops-seq circuit input-ops)
+                                           [circuit output-op] (join-ops circuit input-op anti-join-op)]
+                                       [circuit (-> (reduce #(disj %1 %2) frontier input-ops)
+                                                    (disj input-op anti-join-op)
+                                                    (conj output-op))])
+                                     [circuit frontier])))
+                               [circuit frontier]
+                               anti-joins)
+                              [circuit frontier])
+         ;; sorted-frontier (apply sorted-set-by
+         ;;                        (into [(fn [op-1 op-2]
+         ;;                                 (cond
+         ;;                                   (and
+         ;;                                    (= :anti-join (dbsp/-get-op-type op-1))
+         ;;                                    (not= :anti-join (dbsp/-get-op-type op-2))) 1
+         ;;                                   (and
+         ;;                                    (= :anti-join (dbsp/-get-op-type op-2))
+         ;;                                    (not= :anti-join (dbsp/-get-op-type op-1))) -1
+         ;;                                   (and
+         ;;                                    (static-op? circuit op-1)
+         ;;                                    (not (static-op? circuit op-2))) -1
+         ;;                                   (and
+         ;;                                    (static-op? circuit op-2)
+         ;;                                    (not (static-op? circuit op-1))) 1
+         ;;                                   :else (compare (dbsp/-get-id op-1)
+         ;;                                                  (dbsp/-get-id op-2))))]
+         ;;                              frontier))
+         ]
+     (loop [circuit circuit frontier frontier]
+       (if-let [overlapping-pair (some (fn [op1]
+                                         (some (fn [op2]
+                                                 (when (and (not= op1 op2)
+                                                            #_(not
+                                                               (and
+                                                                (= :not-join
+                                                                   (dbsp/-get-op-type op1))
+                                                                (= :not-join
+                                                                   (dbsp/-get-op-type op2))))
+                                                            (or (ops-overlap? op1 op2)
+                                                                (static-op? circuit op2)))
+                                                   [op1 op2]))
+                                               frontier))
+                                       frontier)]
+         (let [[op1 op2] overlapping-pair
+               [updated-circuit joined-op] (join-ops circuit op1 op2)
+               updated-frontier (-> frontier
+                                    (disj op1 op2)
+                                    (conj joined-op))]
+           (recur updated-circuit updated-frontier))
+         [circuit (into #{} frontier)]))))
 
 (defn- merge-sub-circuit [circuit sub-circuit]
   (let [root (utils/get-root-node circuit)
@@ -277,7 +339,7 @@
                         (graph/terminal-nodes circuit))]
     [circuit (set terminal-nodes)]))
 
-
+#trace
 (defn- process-fn|pred [circuit type args frontier query-graph node input-op-map]
   (let [only-const-args? (every? #(not (symbol? %)) args)
         ops (into []
@@ -387,19 +449,8 @@
         circuit (merge-sub-circuit circuit sub-circuit)
         combined-frontier (set/union frontier sub-circuit-frontier)
         [circuit consolidated-frontier]
-        (consolidate-frontier circuit combined-frontier)
-        ;; _  (when (> (count consolidated-frontier) 1)
-        ;;      (throw (Exception. "Not join resulted in more than one operator")))
-        ;; not-join-last-op (first consolidated-frontier)
-        ;; neg-op (dbsp/->NegOperator
-        ;;         (gensym "neg-")
-        ;;         (dbsp/-get-output-type not-join-last-op))
-        ]
-    [circuit consolidated-frontier]
-    #_[(add-op-inputs circuit neg-op not-join-last-op)
-       (-> consolidated-frontier
-           (disj not-join-last-op)
-           (conj neg-op))]))
+        (consolidate-frontier circuit combined-frontier)]
+    [circuit consolidated-frontier]))
 
 #trace
 (defn- merge-or-branches [circuit frontier branches args rules input-ops]
@@ -440,9 +491,7 @@
                                      (set/union frontier sub-circuit-frontier))
              [final-circuit consolidated-frontier] (consolidate-frontier merged-circuit combined-frontier)
              _  (when (> (count consolidated-frontier) 1)
-                  (prn "Or branch resulted in more than one operator")
-                                        ;(throw (Exception. "Or branch resulted in more than one operator"))
-                  )
+                  (throw (Exception. "Or branch resulted in more than one operator")))
              last-op (first consolidated-frontier)
              [final-circuit projection]
              (project-vars-from-op final-circuit last-op projection-vars)]
@@ -467,36 +516,37 @@
                    (rest projections))]
     [circuit (set (graph/terminal-nodes circuit))]))
 
- (defn- process-non-pattern-clauses
-   "Processes non datom clauses, all required inputs are joined into a single operator"
-   [circuit frontier query-graph rules input-op-map]
-   (let [nodes (filterv
-                #(contains? #{:or-join :not-join :pred :fn :rule}
-                            (graph/attr query-graph % :type))
-                (utils/topsort-query-graph query-graph))]
-     (if (seq nodes)
-       (loop [circuit circuit frontier frontier nodes nodes]
-         (let [[node & nodes] nodes
-               args (->>
-                     (into []
-                           (comp
-                            (filter #(= :arg (first (graph/attr query-graph % :label))))
-                            (map #(vector (:src %) (second (graph/attr query-graph % :label)) (graph/attr query-graph % :required?))))
-                           (graph/in-edges query-graph node))
-                     (sort-by second))
-               [circuit frontier]
-               (case (graph/attr query-graph node :type)
-                 (:pred :fn)
-                 (process-fn|pred circuit (graph/attr query-graph node :type) args frontier query-graph node input-op-map)
-                 :not-join
-                 (handle-not-join circuit frontier args rules input-op-map node)
-                 :or-join
-                 (handle-or-join circuit frontier args rules input-op-map query-graph node)
-                 [circuit frontier])]
-           (if (seq nodes)
-             (recur circuit frontier nodes)
-             [circuit frontier])))
-       [circuit frontier])))
+#trace
+(defn- process-non-pattern-clauses
+  "Processes non datom clauses, all required inputs are joined into a single operator"
+  [circuit frontier query-graph rules input-op-map]
+  (let [nodes (filterv
+               #(contains? #{:or-join :not-join :pred :fn :rule}
+                           (graph/attr query-graph % :type))
+               (utils/topsort-query-graph query-graph))]
+    (if (seq nodes)
+      (loop [circuit circuit frontier frontier nodes nodes]
+        (let [[node & nodes] nodes
+              args (->>
+                    (into []
+                          (comp
+                           (filter #(= :arg (first (graph/attr query-graph % :label))))
+                           (map #(vector (:src %) (second (graph/attr query-graph % :label)) (graph/attr query-graph % :required?))))
+                          (graph/in-edges query-graph node))
+                    (sort-by second))
+              [circuit frontier]
+              (case (graph/attr query-graph node :type)
+                (:pred :fn)
+                (process-fn|pred circuit (graph/attr query-graph node :type) args frontier query-graph node input-op-map)
+                :not-join
+                (handle-not-join circuit frontier args rules input-op-map node)
+                :or-join
+                (handle-or-join circuit frontier args rules input-op-map query-graph node)
+                [circuit frontier])]
+          (if (seq nodes)
+            (recur circuit frontier nodes)
+            [circuit frontier])))
+      [circuit frontier])))
 #trace
 (defn- build-circuit*
   ([inputs query-graph rules]
@@ -546,13 +596,7 @@
          [circuit frontier] (build-circuit* inputs graph rules)
          [circuit last-op]
          (if (> (count frontier) 1)
-           (reduce
-            (fn [[c op] op-2]
-              (join-ops c op op-2))
-            [circuit (first frontier)]
-            (eduction
-             (remove #(= :root (dbsp/-get-op-type %)))
-             (rest frontier)))
+           (join-ops-seq circuit frontier)
            [circuit (first frontier)])
          proj-vars (into [] (comp (map :symbol) (filter some?)) projections)
          projection (dbsp/->FilterOperator
