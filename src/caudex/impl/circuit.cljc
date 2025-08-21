@@ -110,7 +110,7 @@
                       (first zsets))
               :add (add-zsets (first zsets) (second zsets)))]
     (when print?
-      (prn (str "(" (:id op) " " (clojure.string/join " " (mapv #(with-out-str (clojure.pprint/pprint %)) zsets)) ") -> " res)))
+      (println (str "(" (:id op) " " (clojure.string/join " " (mapv #(with-out-str (clojure.pprint/pprint %)) zsets)) ") -> " res)))
     res))
 
 (defn step
