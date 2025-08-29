@@ -198,24 +198,25 @@
                                  (-> (reduce disj frontier static-ops)
                                      (conj op))])
                               [circuit frontier])
-         anti-joins (filterv #(= :anti-join (dbsp/-get-op-type %)) frontier)
-         [circuit frontier] (if (seq anti-joins)
-                              (reduce
-                               (fn [[circuit frontier] anti-join-op]
-                                 (let [input-ops (filterv #(and (not= :anti-join (dbsp/-get-op-type %))
-                                                                (ops-overlap? % anti-join-op))
-                                                          frontier)]
-                                   (if (seq input-ops)
-                                     (let [[circuit input-op] (join-ops-seq circuit input-ops)
-                                           [circuit output-op] (join-ops circuit input-op anti-join-op)]
-                                       [circuit (-> (reduce #(disj %1 %2) frontier input-ops)
-                                                    (disj input-op anti-join-op)
-                                                    (conj output-op))])
-                                     #_(throw (Exception. "No matching ops found for anti-join"))
-                                     [circuit frontier])))
-                               [circuit frontier]
-                               anti-joins)
-                              [circuit frontier])]
+         ;; anti-joins (filterv #(= :anti-join (dbsp/-get-op-type %)) frontier)
+         ;; [circuit frontier] (if (seq anti-joins)
+         ;;                      (reduce
+         ;;                       (fn [[circuit frontier] anti-join-op]
+         ;;                         (let [input-ops (filterv #(and (not= :anti-join (dbsp/-get-op-type %))
+         ;;                                                        (ops-overlap? % anti-join-op))
+         ;;                                                  frontier)]
+         ;;                           (if (seq input-ops)
+         ;;                             (let [[circuit input-op] (join-ops-seq circuit input-ops)
+         ;;                                   [circuit output-op] (join-ops circuit input-op anti-join-op)]
+         ;;                               [circuit (-> (reduce #(disj %1 %2) frontier input-ops)
+         ;;                                            (disj input-op anti-join-op)
+         ;;                                            (conj output-op))])
+         ;;                             #_(throw (Exception. "No matching ops found for anti-join"))
+         ;;                             [circuit frontier])))
+         ;;                       [circuit frontier]
+         ;;                       anti-joins)
+         ;;                      [circuit frontier])
+         ]
      (loop [circuit circuit frontier frontier]
        (if-let [overlapping-pair (some (fn [op1]
                                          (some (fn [op2]
@@ -399,60 +400,94 @@
                  [circuit (conj (set frontier) op)]))]
      (consolidate-frontier circuit frontier)))
 
- (defn- mk-input-ops [circuit sources inputs input-op-map]
-  (reduce
-   (fn [[c m] [in _ required?]]
-     (let [[source idx]
-           (some
-            #(when-let [idx (find-val-idx % in)]
-               [% idx])
-            sources)
-           _ (when (and (nil? idx) (not (contains? input-op-map in)) required?)
-               #?(:cljs (prn (str "Could not find input " in))
-                  :clj (throw (Exception. (str "Could not find input " in)))))]
-       (cond
-         (some? idx) (let [op (dbsp/->FilterOperator
-                               (gensym "input-")
-                               (dbsp/-get-output-type source)
-                               nil
-                               [idx])
-                           m (assoc m in op)]
-                       [(add-op-inputs c op source)
-                        (if (some? source)
-                          (assoc-in m [:sources in] source)
-                          m)])
-         (contains? input-op-map in) [c
-                                      (-> m
-                                          (assoc in (get input-op-map in))
-                                          (assoc-in [:sources in] (get-in input-op-map [:sources in])))]
-         :else [c m])))
-   [circuit {}]
-   inputs))
+ (defn- mk-input-ops
+  ([circuit sources inputs input-op-map]
+   (mk-input-ops circuit sources inputs input-op-map {}))
+  ([circuit sources inputs input-op-map rename-map]
+   (reduce
+    (fn [[c m] [in _ required?]]
+      (let [[source idx]
+            (some
+             #(when-let [idx (find-val-idx % in)]
+                [% idx])
+             sources)
+            _ (when (and (nil? idx) (not (contains? input-op-map in)) required?)
+                #?(:cljs (prn (str "Could not find input " in))
+                   :clj (throw (Exception. (str "Could not find input " in)))))
+            re-in (get rename-map in)]
+        (cond
+          (some? idx) (let [op (dbsp/->FilterOperator
+                                (gensym "input-")
+                                (mapv
+                                 #(if (and re-in (= % in)) re-in %)
+                                 (-> source dbsp/-get-output-type dbsp/-to-vector))
+                                nil
+                                [idx])
+                            m (assoc m (or re-in in) op)]
+                        [(add-op-inputs c op source)
+                         (if (some? source)
+                           (cond-> (assoc-in m [:sources in] source)
+                             re-in (assoc-in [:rename re-in] in))
+                           m)])
+          (contains? input-op-map in)
+          (if re-in
+            (let [source (get-in input-op-map [:sources in])
+                  op (dbsp/->FilterOperator
+                      (gensym "input-")
+                      [re-in]
+                      nil
+                      [(dbsp/->ValIndex 0)])
+                  c (add-op-inputs c op (get input-op-map in))]
+              [c (-> m
+                     (assoc re-in op)
+                     (assoc-in [:sources in] source)
+                     (assoc-in [:rename re-in] in))])
+            [c
+             (-> m
+                 (assoc in (get input-op-map in))
+                 (assoc-in [:sources in] (get-in input-op-map [:sources in])))])
+          :else [c m])))
+    [circuit {}]
+    inputs)))
 
 #trace
-(defn- handle-not-join [circuit frontier args rules input-op-map not-join-body]
-  (let [[circuit input-ops] (mk-input-ops circuit frontier args input-op-map)
-        [sub-circuit sub-circuit-frontier]
-        (build-circuit* (mapv first args) not-join-body rules input-ops)
-        [sub-circuit sub-circuit-frontier]
-        (reduce
-         (fn [[sub-circuit sub-circuit-frontier] op]
-           (let [common-vars (set/intersection
-                              (set (mapv first args))
-                              (set (dbsp/-get-output-type op)))
-                 _ (when (empty? common-vars)
-                     (throw (Exception. "Not join has no valid outputs")))
-                 [sub-circuit proj] (project-vars-from-op sub-circuit op common-vars)
-                 neg-op (dbsp/->AntiJoinOperator
-                         (gensym "anti-join-")
-                         (dbsp/-get-output-type proj))
-                 sub-circuit (add-op-inputs sub-circuit neg-op proj)]
-             [sub-circuit (-> sub-circuit-frontier (disj op) (conj neg-op))]))
+ (defn- handle-not-join [circuit frontier args rules input-op-map not-join-body]
+   (let [[circuit input-ops] (mk-input-ops circuit frontier args input-op-map)
          [sub-circuit sub-circuit-frontier]
-         sub-circuit-frontier)
-        circuit (merge-sub-circuit circuit sub-circuit)
-        combined-frontier (set/union frontier sub-circuit-frontier)]
-    (consolidate-frontier circuit combined-frontier)))
+         (build-circuit* (mapv first args) not-join-body rules input-ops)
+         [sub-circuit sub-circuit-frontier used-ops]
+         (reduce
+          (fn [[sub-circuit sub-circuit-frontier used-ops-seq] op]
+            (let [common-vars (set/intersection
+                               (set (mapv first args))
+                               (set (dbsp/-get-output-type op)))
+                  _ (when (empty? common-vars)
+                      (throw (Exception. "Not join has no valid outputs")))
+                  [sub-circuit proj] (project-vars-from-op sub-circuit op common-vars)
+                  used-ops (filterv #(ops-overlap? % op)
+                                    (-> input-ops :sources vals))
+                  [sub-circuit sub-circuit-frontier]
+                  (reduce
+                   (fn [[sub-circuit sub-circuit-frontier] input-op]
+                     (let [[c a-op] (anti-join-ops sub-circuit input-op proj)]
+                       [c (-> sub-circuit-frontier
+                              (disj proj op)
+                              (conj a-op))]))
+                   [sub-circuit sub-circuit-frontier]
+                   used-ops)
+                  ;; neg-op (dbsp/->AntiJoinOperator
+                  ;;         (gensym "anti-join-")
+                  ;;         (dbsp/-get-output-type proj))
+                  ;; sub-circuit (add-op-inputs sub-circuit neg-op proj)
+                  ]
+             ;; [sub-circuit (-> sub-circuit-frontier (disj op) (conj neg-op))]
+              [sub-circuit sub-circuit-frontier (into used-ops-seq used-ops)]))
+          [sub-circuit sub-circuit-frontier []]
+          sub-circuit-frontier)
+         circuit (merge-sub-circuit circuit sub-circuit)
+         frontier (reduce disj frontier used-ops)
+         combined-frontier (set/union frontier sub-circuit-frontier)]
+     (consolidate-frontier circuit combined-frontier)))
 
 #trace
  (defn- merge-or-branches [circuit branches args rules input-ops]
@@ -480,14 +515,10 @@
     [circuit []]
     branches))
 
+
 #trace
- (defn- handle-or-join [circuit frontier args rules input-op-map query-graph or-join-body]
-   (let [[circuit input-ops] (mk-input-ops circuit frontier args input-op-map)
-         branches (eduction
-                   (filter #(= :conj (graph/attr query-graph % :label)))
-                   (map :dest)
-                   (graph/out-edges query-graph or-join-body))
-         [circuit or-frontiers] (merge-or-branches circuit branches (mapv first args) rules input-ops)
+ (defn- handle-or-join* [circuit frontier args rules input-ops branches]
+   (let [[circuit or-frontiers] (merge-or-branches circuit branches (mapv first args) rules input-ops)
          [circuit or-outputs] (reduce
                                (fn [[circuit or-outputs] or-frontier]
                                  (let [used-ops (filterv #(some (fn [or-op]
@@ -515,37 +546,54 @@
                              output-groups)]
      (consolidate-frontier circuit frontier)))
 
+(defn- handle-or-join [circuit frontier args rules input-op-map query-graph or-join-body]
+  (let [[circuit input-ops] (mk-input-ops circuit frontier args input-op-map)
+         branches (eduction
+                   (filter #(= :conj (graph/attr query-graph % :label)))
+                   (map :dest)
+                   (graph/out-edges query-graph or-join-body))]
+    (handle-or-join* circuit frontier args rules input-ops branches)))
+
 #trace
-(defn- process-non-pattern-clauses
-  "Processes non datom clauses, all required inputs are joined into a single operator"
-  [circuit frontier query-graph rules input-op-map]
-  (let [nodes (filterv
-               #(contains? #{:or-join :not-join :pred :fn :rule}
-                           (graph/attr query-graph % :type))
-               (utils/topsort-query-graph query-graph))]
-    (if (seq nodes)
-      (loop [circuit circuit frontier frontier nodes nodes]
-        (let [[node & nodes] nodes
-              args (->>
-                    (into []
-                          (comp
-                           (filter #(= :arg (first (graph/attr query-graph % :label))))
-                           (map #(vector (:src %) (second (graph/attr query-graph % :label)) (graph/attr query-graph % :required?))))
-                          (graph/in-edges query-graph node))
-                    (sort-by second))
-              [circuit frontier]
-              (case (graph/attr query-graph node :type)
-                (:pred :fn)
-                (process-fn|pred circuit (graph/attr query-graph node :type) args frontier query-graph node input-op-map)
-                :not-join
-                (handle-not-join circuit frontier args rules input-op-map node)
-                :or-join
-                (handle-or-join circuit frontier args rules input-op-map query-graph node)
-                [circuit frontier])]
-          (if (seq nodes)
-            (recur circuit frontier nodes)
-            [circuit frontier])))
-      [circuit frontier])))
+ (defn- handle-rule-clause [circuit frontier args rules input-op-map rule-name]
+   (let [[circuit input-ops] (mk-input-ops circuit frontier args input-op-map)
+         branches (mapv :graph (get-in rules [rule-name :branches]))]
+     (handle-or-join* circuit frontier args rules input-ops branches)))
+
+
+#trace
+ (defn- process-non-pattern-clauses
+   "Processes non datom clauses, all required inputs are joined into a single operator"
+   [circuit frontier query-graph rules input-op-map]
+   (let [nodes (filterv
+                #(contains? #{:or-join :not-join :pred :fn :rule}
+                            (graph/attr query-graph % :type))
+                (utils/topsort-query-graph query-graph))]
+     (if (seq nodes)
+       (loop [circuit circuit frontier frontier nodes nodes]
+         (let [[node & nodes] nodes
+               args (->>
+                     (into []
+                           (comp
+                            (filter #(= :arg (first (graph/attr query-graph % :label))))
+                            (map #(vector (:src %) (second (graph/attr query-graph % :label)) (graph/attr query-graph % :required?))))
+                           (graph/in-edges query-graph node))
+                     (sort-by second))
+               [circuit frontier]
+               (case (graph/attr query-graph node :type)
+                 (:pred :fn)
+                 (process-fn|pred circuit (graph/attr query-graph node :type) args frontier query-graph node input-op-map)
+                 :not-join
+                 (handle-not-join circuit frontier args rules input-op-map node)
+                 :or-join
+                 (handle-or-join circuit frontier args rules input-op-map query-graph node)
+                 :rule
+                 (handle-rule-clause circuit frontier args rules input-op-map (graph/attr query-graph node :fn))
+                 [circuit frontier])]
+           (if (seq nodes)
+             (recur circuit frontier nodes)
+             [circuit frontier])))
+       [circuit frontier])))
 #trace
  (defn- build-circuit*
    ([inputs query-graph rules]

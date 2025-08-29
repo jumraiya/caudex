@@ -293,8 +293,9 @@
                                 [?p :object/description "player"]
                                 [?p :object/location ?l]
                                 (not-join [?l ?p ?o]
-                                          [?o :object/location ?p]
-                                          [?o :object/location ?l])))
+                                          (or-join [?l ?p ?o]
+                                                   [?o :object/location ?p]
+                                                   [?o :object/location ?l]))))
                       [(ground :object-not-found) ?o]
                       [(ground :no-description) ?det]))]
         ccircuit (c/build-circuit q)
@@ -310,14 +311,13 @@
         circuit (impl/step circuit
                            [[:action-1 :action/type :move 124 true]
                             [:action-1 :action/arg :south 124 true]])
-        circuit (impl/step circuit
-                           [[:player :object/location :loc 123 false]
-                            [:player :object/location :loc-2 123 true]])
+        ;; circuit (impl/step circuit
+        ;;                    [[:player :object/location :loc 123 false]
+        ;;                     [:player :object/location :loc-2 123 true]])
         circuit (impl/step circuit
                            [[:action :action/type :inspect 124 true]
                             [:action :action/arg "desc" 124 true]]
-                                        ;:print? true
-                           )
+                           :print? true)
         output (last (impl/get-output-stream circuit))]
     (prn output)
     #_(is (match? {[:obj "desc" "detailed desc" :inspect] true}
@@ -404,4 +404,25 @@
         output (impl/get-output-stream circuit)]
     ;; (utils/prn-graph ccircuit)
     ;; (impl/prn-circuit circuit)
+    (prn output)))
+
+(deftest test-rules
+  (let [q '[:find ?a
+            :in $ %
+            :where
+            [?a :attr :a]
+            (rule ?a)]
+        rules '[[(rule ?a)
+                 [(= ?a 1)]]
+                [(rule ?b)
+                 [?b :attr-2 10]]]
+        ccircuit (c/build-circuit q rules)
+        circuit (impl/reify-circuit ccircuit)
+        circuit (impl/step
+                 circuit
+                 [[1 :attr :a 123 true]
+                  [2 :attr :a 123 true]
+                  [3 :attr :a 123 true]
+                  [3 :attr-2 10 123 true]])
+        output (impl/get-output-stream circuit)]
     (prn output)))

@@ -39,7 +39,8 @@
                         (filter (fn [e] (= :conj (graph/attr graph e :label))))
                         (graph/out-edges graph dest)))
                       false)
-         :not-join (is-var-required? dest var)
+         :not-join true
+                                        ;:not-join (is-var-required? dest var)
          :rule (if (true? (graph/attr graph edge :required?)) true false)
          res))
      true
@@ -65,38 +66,38 @@
         fn-node (str fn-name "-" id)
         counters (update counters fn-name #(inc (or % 0)))]
     [(cond->
-         (reduce
-          (fn [g [idx arg]]
-            (let [fn-sym (-> clause :fn :symbol)
-                  f-name (if (#{:fn :pred} fn-type)
-                           #?(:clj (if-let [f (get d.fns/query-fns fn-sym)]
-                                     f
-                                     (-> fn-sym resolve var-get))
-                              :cljs (if-let [f (get d.fns/query-fns fn-sym)]
-                                      f
-                                      (throw (js/Error. (str "Could not find fn " fn-sym)))))
-                           (-> clause :name get-val))
-                  arg-name (get-val arg)]
-              (-> g
-                  (graph/add-directed-edges
-                   [arg-name fn-node (cond-> {:label [:arg idx]
-                                              :clause-type (case fn-type
-                                                             :pred :pred-arg
-                                                             :fn :fn-arg
-                                                             :rule :rule-arg)}
-                                       (and (= :rule fn-type)
-                                            (contains?
-                                             (-> rule-defs f-name :required-vars)
-                                             idx))
-                                       (assoc :required? true))])
-                  (graph/add-attrs fn-node
-                                   {:fn f-name
-                                    :type fn-type}))))
-          graph
-          (eduction (map-indexed vector) (:args clause)))
-         (= fn-type :fn)
-         (graph/add-directed-edges
-          [fn-node (-> clause :binding :variable :symbol) {:label :binding}]))
+      (reduce
+       (fn [g [idx arg]]
+         (let [fn-sym (-> clause :fn :symbol)
+               f-name (if (#{:fn :pred} fn-type)
+                        #?(:clj (if-let [f (get d.fns/query-fns fn-sym)]
+                                  f
+                                  (-> fn-sym resolve var-get))
+                           :cljs (if-let [f (get d.fns/query-fns fn-sym)]
+                                   f
+                                   (throw (js/Error. (str "Could not find fn " fn-sym)))))
+                        (-> clause :name get-val))
+               arg-name (get-val arg)]
+           (-> g
+               (graph/add-directed-edges
+                [arg-name fn-node (cond-> {:label [:arg idx]
+                                           :clause-type (case fn-type
+                                                          :pred :pred-arg
+                                                          :fn :fn-arg
+                                                          :rule :rule-arg)}
+                                    (and (= :rule fn-type)
+                                         (contains?
+                                          (-> rule-defs f-name :required-vars)
+                                          idx))
+                                    (assoc :required? true))])
+               (graph/add-attrs fn-node
+                                {:fn f-name
+                                 :type fn-type}))))
+       graph
+       (eduction (map-indexed vector) (:args clause)))
+       (= fn-type :fn)
+       (graph/add-directed-edges
+        [fn-node (-> clause :binding :variable :symbol) {:label :binding}]))
      counters]))
 
 (defn- process-where-clauses [{:keys [graph] :as ctx} clauses]
