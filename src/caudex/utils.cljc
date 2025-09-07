@@ -4,7 +4,8 @@
    [caudex.dbsp :as dbsp]
    [clojure.core.protocols :refer [datafy]]
    #?(:clj [com.phronemophobic.clj-graphviz :refer [render-graph]]
-       :cljs ["vis-network" :as vis])))
+      :cljs ["vis-network" :as vis])
+   #?(:clj [clojure.data.json :as json])))
 
 
 (defn is-op? [in]
@@ -15,14 +16,16 @@
   (when (is-op? op)
     {:id (dbsp/-get-id op)
      :type (dbsp/-get-op-type op)
-     :inputs (try
-               (dbsp/-get-input-types op)
-               (catch Exception ex
-                 "error"))
-     :output (try
-               (dbsp/-get-output-type op)
-               (catch Exception ex
-                 "error"))}))
+     :inputs (dbsp/-get-input-types op)
+     #_(try
+       (dbsp/-get-input-types op)
+       (catch Exception ex
+         "error"))
+     :output (dbsp/-get-output-type op)
+     #_(try
+       (dbsp/-get-output-type op)
+       (catch Exception ex
+         "error"))}))
 
 
 (defn get-root-node [graph]
@@ -64,34 +67,78 @@
     (if-let [op (or (op->edn n)
                     (graph/attr g n :op))]
       (str op (graph/attr g n :pattern))
-      (str n))
+      (str (if (is-op? n)
+             (dbsp/-get-id n)
+             n)))
     "nil"))
+
+(defn circuit->map [circuit]
+  (let [ccircuit (if (and (map? circuit) (contains? circuit :circuit))
+                   (:circuit circuit)
+                   circuit)
+        id #(str (if (is-op? %) (dbsp/-get-id %) %))
+        label #(str (if (is-op? %) (str (dbsp/-get-id %)
+                                        ;; (dbsp/-get-input-types %)
+                                        " "
+                                        (dbsp/-get-output-type %))
+                        %))
+        nodes (mapv #(hash-map "id" (id %)
+                               #_(first (get ids (:id %)))
+                               "label" (label %)
+                               #_(display-node g (second (get ids (:id %)))))
+                    (graph/nodes ccircuit))
+        edges (mapv #(hash-map "from" (-> % :src id)
+                               #_(first (get ids (-> % :src :id)))
+                               "to" (-> % :dest id)
+                               #_(first (get ids (->  % :dest :id))))
+                    (graph/edges ccircuit))
+        data     (cond->
+                     {:nodes nodes :edges edges}
+                     (contains? circuit :streams) (assoc :streams (:streams circuit)
+                                                         :op-stream-map (:op-stream-map circuit)))]
+    (spit "circuit_data.json" (json/write-str data))
+    data))
+
 
 
 (defn prn-graph
   ([g]
    (prn-graph g "graph"))
   ([g container-id]
-   #?(:clj
-      (render-graph
-       (assoc
-        {:nodes (mapv #(display-node g %) (graph/nodes g))
-         :edges (into []
-                      (map #(hash-map :from (display-node g (:src %))
-                                      :to (display-node g  (:dest %))
-                                      :label (str (get-in (:attrs g) [(:id %) :label]))))
-                      (graph/edges g))}
-        :flags #{:directed} :default-attributes {:edge {:label "label"}} :layout-algorithm :neato))
-      :cljs (let [ids (into {} (map-indexed #(vector (:id %2) [%1 %2]) (graph/nodes g)))
-                  nodes (apply array (mapv #(js-obj "id" (first (get ids (:id %)))
-                                                    "label" (display-node g (second (get ids (:id %)))))
-                                           (graph/nodes g)))
-                  edges (apply array (mapv #(js-obj "from" (first (get ids (-> % :src :id)))
-                                                    "to" (first (get ids (->  % :dest :id))))
-                                           (graph/edges g)))
-                  container (.getElementById js/document container-id)]
-              (vis/Network. container (js-obj "nodes" nodes "edges" edges)
-                            #js {"edges" #js{"arrows" #js {"to" #js {"enabled" true}}}})))))
+   (let [{:keys [nodes edges] :as circuit-map} (circuit->map g)]
+     #?(:clj
+        (render-graph
+         (assoc
+          {:nodes (mapv #(display-node g %) (graph/nodes g))
+           :edges (into []
+                        (map #(hash-map :from (display-node g (:src %))
+                                        :to (display-node g  (:dest %))
+                                        :label (str (get-in (:attrs g) [(:id %) :label]))))
+                        (graph/edges g))}
+          :flags #{:directed} :default-attributes {:edge {:label "label"}} :layout-algorithm :neato))
+        :cljs (let [container (.getElementById js/document container-id)]
+                (js/console.log nodes)
+                (js/console.log edges)
+                (vis/Network. container
+                              (js-obj "nodes" nodes "edges" edges)
+                              (js-obj
+                               {"edges" {"arrows"  {"to" {"enabled" true}}}
+                                "layout" {"hierarchical" {"direction" "UD"
+                                                          "sortMethod" "directed"}}
+
+                                "interaction" {"dragNodes" false}
+                                        ;"physics" {"enabled" false}
+                                ;; "configure" {"filter" (fn [option path]
+                                ;;                         (not= -1 (.indexOf path "hierarchical")))
+                                ;;              ;; function (option, path) {
+                                ;;              ;;                          if (path.indexOf("hierarchical") !== -1) {
+                                ;;              ;;                                                                    return true ;
+                                ;;              ;;                                                                    }
+                                ;;              ;;                          return false ;
+                                ;;              ;;                          },
+                                ;;              "showButton" false}
+
+                                "physics" {"hierarchicalRepulsion" {"avoidOverlap" 1}}})))))))
 
 (defn topsort
   [circuit & {:keys [start visited visited-check-fn]
@@ -202,11 +249,13 @@
    query-graph
    (assoc opts :visited-check-fn
           (fn [dep node]
+            (prn "dep" dep "node" node)
             (if (contains? #{:rule :or-join :not-join}
                            (graph/attr query-graph node :type))
-              (not (graph/attr query-graph
-                              (graph/find-edge query-graph dep node)
-                              :required?))
+              (not (graph/attr
+                    query-graph (graph/find-edge query-graph dep node) :required?)
+                   #_(when-let [edge (graph/find-edge query-graph dep node)]
+                       (graph/attr query-graph edge :required?)))
               (not (symbol? dep)))))))
 
 (defn datafy-circuit [circuit]

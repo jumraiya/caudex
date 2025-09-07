@@ -35,7 +35,8 @@
       :streams {-1 [] -2 []}
       :op-stream-map {(dbsp/-get-id root) {:inputs (sorted-map 0 -1) :outputs []}
                       (dbsp/-get-id last-op) {:outputs [-2]}}
-      :order order}
+      :order order
+      :circuit circuit}
      (eduction
       (map-indexed vector)
       (graph/edges circuit)))))
@@ -50,7 +51,7 @@
        (conj set-1 row)))
    zset-1
    zset-2))
-#trace
+
 (defn- exec-filter-op [zsets op]
   (into {}
         (comp
@@ -79,11 +80,10 @@
                                                  (:args op))
                                       indices-used? (some #(when (is-idx? %) %) (:args op))
                                       res (apply (:mapping-fn op) args)]
-                                  [(if indices-used?
-                                     (conj row res)
+                                  (if indices-used?
+                                    [(conj row res) add?]
                                      ;; If no indices were used, simply return the result
-                                     [res])
-                                   add?])))
+                                    [[res] true]))))
                          (first zsets))
               :neg (update-vals (first zsets) not)
               :delay (or (-> streams first butlast last) {})
@@ -110,7 +110,11 @@
                       (first zsets))
               :add (add-zsets (first zsets) (second zsets)))]
     (when print?
-      (println (str "(" (:id op) " " (clojure.string/join " " (mapv #(with-out-str (clojure.pprint/pprint %)) zsets)) ") -> " res)))
+      #_(println (str "(" (:id op) " "
+                    (clojure.string/join
+                     " "
+                     (mapv #(with-out-str (prn %)) zsets))
+                    ") -> " res)))
     res))
 
 (defn step
@@ -152,5 +156,5 @@
              " outputs: " (when-let [idx (first outputs)]
                             (nth (get streams idx) t)))))))
 
-;(prn-circuit user/c)
+                                        ;(prn-circuit user/c)
 

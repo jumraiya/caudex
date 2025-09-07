@@ -7,8 +7,6 @@
             [caudex.utils :as utils]))
 
 
-
-
 (deftest simple-join
   (let [q '[:find ?a ?b
             :where
@@ -98,7 +96,6 @@
                      (not-join [?a]
                                [_ :attr ?a]))]
         ccircuit (c/build-circuit q)
-        _ (utils/prn-graph ccircuit)
         circuit (impl/reify-circuit ccircuit)
         circuit (impl/step circuit
                            [[:a :attr-2 10 123 true]
@@ -258,28 +255,29 @@
     (is (match? {[:not-found false] true} output))))
 
 (deftest test-or-join-5
-  (let [q '[:find ?o ?arg ?action-type ?det
-             ;?o ?arg ?det ?action-type
+  (let [q '[:find ?a ?arg ?action-type ?o ?det
             :where
             [?a :action/arg ?arg]
             [?a :action/type ?action-type]
-            (or-join [?a]
-                     (and
-                      [?a :action/type :inspect]
-                      (not-join [?a]
-                                [?a :action/inspect-processed? true]))
-                     (and
-                      [?a :action/type :pickup]
-                      (not-join [?a]
-                                [?a :action/pickup-processed? true])))
+            [?a :action/type :inspect]
+            (not-join [?a]
+                      [?a :action/inspect-processed? true])
+            #_(or-join [?a]
+                       (and
+                        [?a :action/type :inspect]
+                        (not-join [?a]
+                                  [?a :action/inspect-processed? true]))
+                       (and
+                        [?a :action/type :pickup]
+                        (not-join [?a]
+                                  [?a :action/pickup-processed? true])))
             (or-join [?o ?arg ?det]
                      (and
+                      [(not= ?arg "player")]
                       [?o :object/description ?arg]
                       [?o :object/detailed-description ?det]
                       [?p :object/description "player"]
                       [?p :object/location ?l]
-                      (not-join [?o]
-                                [?o :object/description "player"])
                       (or-join [?l ?p ?o]
                                [?o :object/location ?p]
                                [?o :object/location ?l]))
@@ -290,16 +288,17 @@
                                          [_ :object/description ?arg])
                                (and
                                 [?o :object/description ?arg]
-                                [?p :object/description "player"]
-                                [?p :object/location ?l]
-                                (not-join [?l ?p ?o]
+                                [(not= ?arg "player")]
+                                (not-join [?o]
+                                          [?p :object/description "player"]
+                                          [?p :object/location ?l]
                                           (or-join [?l ?p ?o]
                                                    [?o :object/location ?p]
                                                    [?o :object/location ?l]))))
                       [(ground :object-not-found) ?o]
                       [(ground :no-description) ?det]))]
         ccircuit (c/build-circuit q)
-        ;_ (caudex.utils/prn-graph ccircuit)
+        ;; _ (caudex.utils/prn-graph ccircuit)
         circuit (impl/reify-circuit ccircuit)
         circuit (impl/step circuit
                            [[:obj :object/description "desc" 123 true]
@@ -311,17 +310,31 @@
         circuit (impl/step circuit
                            [[:action-1 :action/type :move 124 true]
                             [:action-1 :action/arg :south 124 true]])
-        ;; circuit (impl/step circuit
-        ;;                    [[:player :object/location :loc 123 false]
-        ;;                     [:player :object/location :loc-2 123 true]])
         circuit (impl/step circuit
-                           [[:action :action/type :inspect 124 true]
-                            [:action :action/arg "desc" 124 true]]
-                           :print? true)
-        output (last (impl/get-output-stream circuit))]
-    (prn output)
-    #_(is (match? {[:obj "desc" "detailed desc" :inspect] true}
-                  output))))
+                           [[:action-2 :action/type :inspect 124 true]
+                            [:action-2 :action/arg "desc" 124 true]])
+        output (last (impl/get-output-stream circuit))
+        circuit (impl/step circuit
+                           [[:action-2 :action/inspect-processed? true 124 true]])
+        circuit (impl/step circuit
+                           [[:player :object/location :loc 123 false]
+                            [:player :object/location :loc-2 123 true]])
+        circuit (impl/step circuit
+                           [[:action-3 :action/type :inspect 124 true]
+                            [:action-3 :action/arg "desc" 124 true]]
+                           ;; :print? true
+                           )
+        _ (caudex.utils/circuit->map circuit)
+        output-2 (last (impl/get-output-stream circuit))]
+
+    (prn output output-2)
+    #_(is (match?
+           {[:obj "desc" :inspect "detailed desc"] true}
+           output))
+
+    #_(is (match?
+           {[:object-not-found "desc" :inspect :no-description] true}
+           output-2))))
 
 
 (deftest test-refs
@@ -407,22 +420,88 @@
     (prn output)))
 
 (deftest test-rules
-  (let [q '[:find ?a
+  (let [tx-data [[1 :attr :a 123 true]
+                 [2 :attr :a 123 true]
+                 [3 :attr :a 123 true]
+                 [3 :attr-2 10 123 true]]
+        q '[:find ?a
             :in $ %
             :where
             [?a :attr :a]
             (rule ?a)]
-        rules '[[(rule ?a)
-                 [(= ?a 1)]]
+        rules '[[(rule ?b)
+                 [(= ?b 1)]]
                 [(rule ?b)
                  [?b :attr-2 10]]]
         ccircuit (c/build-circuit q rules)
         circuit (impl/reify-circuit ccircuit)
-        circuit (impl/step
-                 circuit
-                 [[1 :attr :a 123 true]
-                  [2 :attr :a 123 true]
-                  [3 :attr :a 123 true]
-                  [3 :attr-2 10 123 true]])
-        output (impl/get-output-stream circuit)]
-    (prn output)))
+        circuit (impl/step circuit tx-data)
+        output (last (impl/get-output-stream circuit))
+        ccircuit (c/build-circuit q '[[(rule ?b)
+                                       (not-join [?b]
+                                        [(= ?b 1)])]])
+        circuit (impl/reify-circuit ccircuit)
+        circuit (impl/step circuit tx-data)
+        output' (last (impl/get-output-stream circuit))
+        q '[:find ?a
+            :in $ %
+            :where
+            [?a :attr :a]
+            (not-join [?a]
+                      (rule ?a))]
+        ccircuit (c/build-circuit q rules)
+        circuit (impl/reify-circuit ccircuit)
+        circuit (impl/step circuit tx-data)
+        output-2 (last (impl/get-output-stream circuit))]
+    (is (match?
+         {[1] true, [3] true}
+         output))
+    (is (match?
+         {[2] true, [3] true}
+         output'))
+    (is (match?
+         {[2] true}
+         output-2))))
+
+(deftest test-disjoint-not-join
+  (let [q '[:find ?o ?accessible
+            :where
+            [?o :object/desc ?d]
+            (not-join [?o]
+                      [?o :object/desc "player"])
+            (or-join [?o ?accessible]
+                     (and
+                      [?p :object/loc ?l]
+                      [?p :object/desc "player"]
+                      (or-join [?l ?p ?o]
+                               [?o :object/loc ?p]
+                               [?o :object/loc ?l])
+                      [(ground :accessible) ?accessible])
+                     (and
+                      (not-join [?o]
+                                [?p :object/loc ?l]
+                                [?p :object/desc "player"]
+                                (or-join [?l ?p ?o]
+                                         [?o :object/loc ?p]
+                                         [?o :object/loc ?l]))
+                      [(ground :not-accessible) ?accessible]))]
+        ccircuit (c/build-circuit q)
+        _ (caudex.utils/prn-graph ccircuit)
+        circuit (impl/reify-circuit ccircuit)
+        circuit (impl/step circuit
+                           [[:obj :object/desc "desc" 123 true]
+                            [:obj :object/loc :loc 123 true]
+                            [:player :object/desc "player" 123 true]
+                            [:player :object/loc :loc-2 123 true]] 
+                           ;:print? true
+                           )
+        ;not-accessible
+        output (last (impl/get-output-stream circuit))
+        circuit (impl/step circuit
+                           [[:player :object/loc :loc 123 true]
+                            [:player :object/loc :loc-2 123 false]]
+                           ;; :print? true
+                           )
+                                        ;accessible
+        output-2 (last (impl/get-output-stream circuit))]
+    (prn output output-2)))

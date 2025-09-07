@@ -31,9 +31,13 @@
 
 (defn in-edges [graph node]
   #?(:clj (uber/in-edges graph node)
-     :cljs (mapv (fn [[src dest]]
-                   (hash-map :src src :dest dest))
-                 (loom/in-edges graph node))))
+     :cljs (into []
+                 (comp
+                  (filter (fn [[_ dest]]
+                            (= dest node)))
+                  (map (fn [[src dest]]
+                            (hash-map :src src :dest dest))))
+                 (loom/edges graph))))
 
 (defn in-degree [graph node]
   #?(:clj (uber/in-degree graph node)
@@ -53,9 +57,10 @@
 
 (defn find-edge [graph node-1 node-2]
   #?(:clj (uber/find-edge graph node-1 node-2)
-     :cljs (some #(when (= node-1 (first %))
+     :cljs (some #(when (and (= node-1 (first %))
+                             (= node-2 (second %)))
                     {:src node-1 :dest node-2})
-                 (loom/in-edges graph node-2))))
+                 (loom/edges graph))))
 
 (defn add-attr [graph node|edge attr value]
   #?(:clj (uber/add-attr graph node|edge attr value)
