@@ -71,33 +71,39 @@
              (dbsp/-get-id n)
              n)))
     "nil"))
-
-(defn circuit->map [circuit]
-  (let [ccircuit (if (and (map? circuit) (contains? circuit :circuit))
-                   (:circuit circuit)
-                   circuit)
-        id #(str (if (is-op? %) (dbsp/-get-id %) %))
-        label #(str (if (is-op? %) (str (dbsp/-get-id %)
+#trace
+ (defn circuit->map [circuit]
+   (let [ccircuit (if (and (map? circuit) (contains? circuit :circuit))
+                    (:circuit circuit)
+                    circuit)
+         id #(str (if (is-op? %) (dbsp/-get-id %) %))
+         label #(str (if (is-op? %) (str (dbsp/-get-id %)
                                         ;; (dbsp/-get-input-types %)
-                                        " "
-                                        (dbsp/-get-output-type %))
-                        %))
-        nodes (mapv #(hash-map "id" (id %)
-                               #_(first (get ids (:id %)))
-                               "label" (label %)
-                               #_(display-node g (second (get ids (:id %)))))
-                    (graph/nodes ccircuit))
-        edges (mapv #(hash-map "from" (-> % :src id)
-                               #_(first (get ids (-> % :src :id)))
-                               "to" (-> % :dest id)
-                               #_(first (get ids (->  % :dest :id))))
-                    (graph/edges ccircuit))
-        data     (cond->
-                     {:nodes nodes :edges edges}
-                     (contains? circuit :streams) (assoc :streams (:streams circuit)
-                                                         :op-stream-map (:op-stream-map circuit)))]
-    (spit "circuit_data.json" (json/write-str data))
-    data))
+                                         " "
+                                         (dbsp/-get-output-type %))
+                         %))
+         nodes (mapv #(hash-map "id" (id %)
+                                #_(first (get ids (:id %)))
+                                "label" (label %)
+                                #_(display-node g (second (get ids (:id %)))))
+                     (graph/nodes ccircuit))
+         edges (mapv #(hash-map "from" (-> % :src id)
+                                #_(first (get ids (-> % :src :id)))
+                                "to" (-> % :dest id)
+                                #_(first (get ids (->  % :dest :id))))
+                     (graph/edges ccircuit))
+         tx-data->zset #(into {}
+                             (map (fn [[e a v _tx add?]]
+                                    [[e a v] add?]))
+                             %)
+         data     (cond->
+                      {:nodes nodes :edges edges}
+                      (contains? circuit :streams)
+                      (assoc :streams (update (:streams circuit) -1
+                                              #(mapv (fn [c] (tx-data->zset c)) %))
+                             :op-stream-map (:op-stream-map circuit)))]
+     (spit "circuit_data.json" (json/write-str data))
+     data))
 
 
 
@@ -249,13 +255,11 @@
    query-graph
    (assoc opts :visited-check-fn
           (fn [dep node]
-            (prn "dep" dep "node" node)
             (if (contains? #{:rule :or-join :not-join}
                            (graph/attr query-graph node :type))
-              (not (graph/attr
-                    query-graph (graph/find-edge query-graph dep node) :required?)
-                   #_(when-let [edge (graph/find-edge query-graph dep node)]
-                       (graph/attr query-graph edge :required?)))
+              (not (and (graph/attr
+                         query-graph (graph/find-edge query-graph dep node) :required?)
+                        (symbol? dep)))
               (not (symbol? dep)))))))
 
 (defn datafy-circuit [circuit]

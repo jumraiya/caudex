@@ -5,7 +5,7 @@
             [caudex.graph :as graph]
             [caudex.dbsp :as dbsp]))
 
-(defn- tx-data->zset [txs]
+(defn tx-data->zset [txs]
   (into {}
         (map (fn [[e a v _tx add?]]
                [[e a v] add?]))
@@ -65,7 +65,7 @@
                    v]
                   [k v]))))
         (first zsets)))
-
+#trace
 (defn- step-op [op streams print?]
   (let [zsets (mapv last streams)
         res (case (dbsp/-get-op-type op)

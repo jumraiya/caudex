@@ -53,28 +53,53 @@
           idx|const))
       (-get-args this)))))
 
- (defn- find-constraints [zset-type-1 zset-type-2]
-   (let [collect-pos #(transduce
-                       (comp
-                        (filter symbol?)
-                        (map-indexed vector)
-                        (map (fn [[idx-1 el]]
-                               [el (+ %2 idx-1)])))
-                       (completing
-                        (fn [indices [el idx]]
-                          (update indices el conj idx)))
-                       {}
-                       %1)
-         indices-1 (collect-pos (-to-vector zset-type-1) 0)
-         indices-2 (collect-pos (-to-vector zset-type-2) (count (-to-vector zset-type-1)))]
-     (reduce
-      (fn [constraints [var indices]]
-        (into constraints
-              (for [idx-1 indices idx-2 (get indices-2 var)]
-                [= (->ValIndex idx-1)
-                 (->ValIndex idx-2)])))
-      []
-      indices-1)))
+                       
+(defn- find-constraints [zset-type-1 zset-type-2]
+  (let [collect-pos #(transduce
+                      (comp
+                       (map-indexed vector)
+                       (filter (fn [[_ el]] (symbol? el)))
+                       (map (fn [[idx-1 el]]
+                              [el (+ %2 idx-1)])))
+                      (completing
+                       (fn [indices [el idx]]
+                         (update indices el conj idx)))
+                      {}
+                      %1)
+        indices-1 (collect-pos (-to-vector zset-type-1) 0)
+        indices-2 (collect-pos (-to-vector zset-type-2)
+                               (count (-to-vector zset-type-1)))]
+    (reduce
+     (fn [constraints [var indices]]
+       (into constraints
+             (for [idx-1 indices idx-2 (get indices-2 var)]
+               [= (->ValIndex idx-1)
+                (->ValIndex idx-2)])))
+     []
+     indices-1)))
+
+#_(defn- find-constraints [zset-type-1 zset-type-2]
+    (let [collect-pos #(transduce
+                        (comp
+                         (filter symbol?)
+                         (map-indexed vector)
+                         (map (fn [[idx-1 el]]
+                                [el (+ %2 idx-1)])))
+                        (completing
+                         (fn [indices [el idx]]
+                           (update indices el conj idx)))
+                        {}
+                        %1)
+          indices-1 (collect-pos (-to-vector zset-type-1) 0)
+          indices-2 (collect-pos (-to-vector zset-type-2) (count (-to-vector zset-type-1)))]
+      (reduce
+       (fn [constraints [var indices]]
+         (into constraints
+               (for [idx-1 indices idx-2 (get indices-2 var)]
+                 [= (->ValIndex idx-1)
+                  (->ValIndex idx-2)])))
+       []
+       indices-1)))
 
 (extend-type #?(:clj clojure.lang.PersistentVector
                 :cljs cljs.core/PersistentVector)

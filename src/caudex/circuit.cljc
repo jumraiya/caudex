@@ -44,6 +44,7 @@
       (eduction
        (map :src)
        (graph/in-edges circuit op))))
+    (-> op meta :static-op true?)
     (and
      (= 1 (count (dbsp/-get-input-types op)))
      (every? #(not (symbol? %)) (-> op dbsp/-get-input-types first dbsp/-to-vector)))))
@@ -146,6 +147,7 @@
 (defn- anti-join-ops [circuit input-op not-join-op]
    (let [op-vars (-> input-op (dbsp/-get-output-type) (dbsp/-to-vector))
          _ (when (static-op? circuit input-op)
+             ;(prn "Trying to join static op with anti-join")
              (throw #?(:cljs (js/Error. "Trying to join static op with anti-join")
                        :clj (Exception. "Trying to join static op with anti-join"))))
          [circuit joined-output] (join-ops* circuit input-op not-join-op)
@@ -159,23 +161,7 @@
                     (gensym "add-")
                     op-vars)]
      [(add-op-inputs circuit final-add proj input-op) final-add]))
-#_(defn- anti-join-ops [circuit input-op not-join-op]
-    (let [negated (dbsp/->NegOperator
-                   (gensym "neg-")
-                   (dbsp/-get-output-type not-join-op))
-          op-vars (-> input-op (dbsp/-get-output-type) (dbsp/-to-vector))
-          circuit (add-op-inputs circuit negated not-join-op)
-          _ (when (static-op? circuit input-op)
-              (throw #?(:cljs (js/Error. "Trying to join static op with anti-join")
-                        :clj (Exception. "Trying to join static op with anti-join"))))
-          [circuit joined-output] (join-ops* circuit input-op negated)
-                                        ;(non-integrated-join circuit input-op negated)
-          [circuit proj] (project-vars-from-op
-                          circuit joined-output op-vars)
-          final-add (dbsp/->AddOperator
-                     (gensym "add-")
-                     op-vars)]
-      [(add-op-inputs circuit final-add proj input-op) final-add]))
+
 #trace
  (defn- join-ops
    [circuit op-1 op-2]
@@ -426,59 +412,71 @@
                     frontier)
                  [circuit (conj (set frontier) op)]))]
      (consolidate-frontier circuit frontier)))
-
+#trace
  (defn- mk-input-ops
-  ([circuit sources inputs input-op-map]
-   (mk-input-ops circuit sources inputs input-op-map {}))
-  ([circuit sources inputs input-op-map rename-map]
-   (reduce
-    (fn [[c m] [in _ required?]]
-      (let [[source idx]
-            (some
-             #(when-let [idx (find-val-idx % in)]
-                [% idx])
-             sources)
-            _ (when (and (nil? idx) (not (contains? input-op-map in)) required?)
-                #?(:cljs (prn (str "Could not find input " in))
-                   :clj (throw (Exception. (str "Could not find input " in)))))
-            re-in (get rename-map in)]
-        (cond
-          (some? idx) (let [op (dbsp/->FilterOperator
-                                (gensym "input-")
-                                (mapv
-                                 #(if (and re-in (= % in)) re-in %)
-                                 (-> source dbsp/-get-output-type dbsp/-to-vector))
-                                nil
-                                [idx])
-                            m (assoc m (or re-in in) op)]
-                        [(add-op-inputs c op source)
-                         (if (some? source)
-                           (cond-> (assoc-in m [:sources (or re-in in)] source)
-                             re-in (assoc-in [:rename re-in] in))
-                           m)])
-          (contains? input-op-map in)
-          (if re-in
-            (let [source (get-in input-op-map [:sources in])
-                  op (dbsp/->FilterOperator
-                      (gensym "input-")
-                      [re-in]
-                      nil
-                      [(dbsp/->ValIndex 0)])
-                  c (add-op-inputs c op (get input-op-map in))]
-              [c (-> m
-                     (assoc re-in op)
-                     (assoc-in [:sources re-in] source)
-                     (assoc-in [:rename re-in] in))])
-            [c
-             (cond->
-              (-> m
-                  (assoc in (get input-op-map in))
-                  (assoc-in [:sources in] (get-in input-op-map [:sources in])))
-               (contains? (get input-op-map :rename) in)
-               (assoc-in [:rename in] (get-in input-op-map [:rename in])))])
-          :else [c m])))
-    [circuit {}]
-    inputs)))
+   ([circuit sources inputs input-op-map]
+    (mk-input-ops circuit sources inputs input-op-map {}))
+   ([circuit sources inputs input-op-map rename-map]
+    (reduce
+     (fn [[c m] [in _ required?]]
+       (let [[c source idx const-op?]
+             (if (not (symbol? in))
+               (let [f-op (dbsp/->MapOperator (gensym "fn-")
+                                              [in]
+                                              [in]
+                                              identity
+                                              [in])]
+                 [(add-op-inputs c f-op (get-root c)) f-op (dbsp/->ValIndex 0) true])
+               (into [c]
+                     (some
+                      #(when-let [idx (find-val-idx % in)]
+                         [% idx false])
+                      sources)))
+             _ (when (and (nil? idx) (not (contains? input-op-map in)) required?)
+                 #?(:cljs (prn (str "Could not find input " in))
+                    :clj (throw (Exception. (str "Could not find input " in)))))
+             re-in (get rename-map in)]
+         (cond
+           (some? idx) (let [op (cond-> (dbsp/->FilterOperator
+                                         (gensym "input-")
+                                         (mapv
+                                          #(if (and re-in (= % in)) re-in %)
+                                          (-> source dbsp/-get-output-type dbsp/-to-vector))
+                                         nil
+                                         [idx])
+                                  const-op? (with-meta {:static-op true}))
+                             m (assoc m (or re-in in) op)]
+                         [(add-op-inputs c op source)
+                          (if (some? source)
+                            ;(assoc-in m [:sources (or re-in in)] source)
+                            (cond-> (assoc-in m [:sources (or re-in in)] source)
+                              (contains? (:rename m) in) (update :rename dissoc in))
+                            m)])
+           (contains? input-op-map in)
+           (if re-in
+             (let [source (get-in input-op-map [:sources in])
+                   op (dbsp/->FilterOperator
+                       (gensym "input-")
+                       [re-in]
+                       nil
+                       [(dbsp/->ValIndex 0)])
+                   c (add-op-inputs c op (get input-op-map in))]
+               [c (-> m
+                      (assoc re-in op)
+                      (assoc-in [:sources re-in] source)
+                      ;(assoc-in [:rename re-in] in)
+                      )])
+             [c
+              (cond->
+               (-> m
+                   (assoc in (get input-op-map in))
+                   (assoc-in [:sources in] (get-in input-op-map [:sources in]))))])
+           :else [c m])))
+     [circuit {:rename (into (:rename input-op-map {})
+                             (zipmap (vals rename-map) (keys rename-map)))}
+      ;{}
+      ]
+     inputs)))
 
 #trace
  (defn- handle-not-join [circuit frontier args rules input-op-map not-join-body]
@@ -500,11 +498,12 @@
                       #?(:cljs (throw (js/Error. "Not join has no valid outputs"))
                          :clj (throw (Exception. "Not join has no valid outputs"))))
                   [sub-circuit proj] (project-vars-from-op sub-circuit op common-vars (get input-ops :rename {}))
-                  used-ops (filterv #(ops-overlap? % proj)
+                  used-ops (filterv #(and (ops-overlap? % proj)
+                                          (not (static-op? circuit %)))
                                     (-> input-ops :sources vals set))
                   _ (when (empty? used-ops)
                       #?(:cljs (throw (js/Error. "Not join could not find original source"))
-                         :clj(throw (Exception. "Not join could not find original source"))))
+                         :clj (throw (Exception. "Not join could not find original source"))))
                   frontier (reduce disj frontier used-ops)
                   [sub-circuit anti-join-outputs] (reduce
                                                    (fn [[sub-circuit anti-join-outputs] input-op]
@@ -534,20 +533,24 @@
    (reduce
     (fn [[base-circuit frontiers] branch-graph]
       (let [[sub-circuit sub-circuit-frontier] (build-circuit* args branch-graph rules input-ops)
-            arg-set (set args)
+            arg-set (into #{}
+                          (map #(get (:rename input-ops) % %))
+                          args)
+            #_(if (not-empty (:rename input-ops))
+              (-> input-ops :rename keys set)
+              (set args))
+                                        ;arg-set (set args)
             [sub-circuit sub-circuit-frontier] (reduce
                                                 (fn [[sub-circuit sub-circuit-frontier] op]
-                                                  (let [op-output (-> op dbsp/-get-output-type dbsp/-to-vector set)]
-                                                    (if-not (= arg-set op-output)
-                                                      (let [[c new-op] (project-vars-from-op
-                                                                        sub-circuit op
-                                                                        (sort
-                                                                         (set/intersection
-                                                                          arg-set
-                                                                          op-output))
-                                                                        (get input-ops :rename {}))]
-                                                        [c (-> sub-circuit-frontier (disj op) (conj new-op))])
-                                                      [sub-circuit sub-circuit-frontier])))
+                                                  (let [op-output (-> op dbsp/-get-output-type dbsp/-to-vector set)
+                                                        [c new-op] (project-vars-from-op
+                                                                    sub-circuit op
+                                                                    (sort
+                                                                     (set/intersection
+                                                                      arg-set
+                                                                      op-output))
+                                                                    (get input-ops :rename {}))]
+                                                    [c (-> sub-circuit-frontier (disj op) (conj new-op))]))
                                                 [sub-circuit sub-circuit-frontier]
                                                 sub-circuit-frontier)
             merged-circuit (merge-sub-circuit base-circuit sub-circuit)]
@@ -556,7 +559,7 @@
     branches))
 
 #trace
-(defn- handle-or-join* [circuit frontier args rules input-ops branches]
+ (defn- handle-or-join* [circuit frontier args rules input-ops branches]
    (let [[circuit or-frontiers] (merge-or-branches circuit branches (mapv first args) rules input-ops)
          [circuit or-outputs] (reduce
                                (fn [[circuit or-outputs] or-frontier]
@@ -570,7 +573,7 @@
                                                                    _ (when (> (count or-frontier) 1)
                                                                        #?(:cljs (throw (js/Error. "Or branch resulted in more than one op"))
                                                                           :clj (throw (Exception. "Or branch resulted in more than one op"))))
-                                                                   proj-vars (-> or-frontier first dbsp/-get-output-type dbsp/-to-vector set sort)
+                                                                   proj-vars (->> or-frontier first dbsp/-get-output-type dbsp/-to-vector set (sort-by name))
                                                                    [circuit output] (project-vars-from-op circuit (first or-frontier) proj-vars)]
                                                                [circuit [output]])
                                                              [circuit or-frontier])]
@@ -601,8 +604,10 @@
  (defn- handle-rule-clause [circuit frontier args rules input-op-map rule-name]
    (let [branches (mapv :graph (get-in rules [rule-name :branches]))
          rule-args (-> rules (get rule-name) :branches first :args)
-         [circuit input-ops] (mk-input-ops
-                              circuit frontier args input-op-map (zipmap (mapv first args) rule-args))]
+         rename-map (zipmap (mapv first args) rule-args)
+         ;(filterv #(symbol? (key %)) (zipmap (mapv first args) rule-args))
+         [circuit input-ops]
+         (mk-input-ops circuit frontier args input-op-map rename-map)]
      (handle-or-join* circuit frontier args rules input-ops branches)))
 
 

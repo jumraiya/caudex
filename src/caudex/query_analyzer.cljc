@@ -20,7 +20,7 @@
     (:value v)
     datascript.parser.Placeholder
     '_))
-
+#trace
 (defn- is-var-required? [graph var]
   (if (or (some #(when (= :binding (graph/attr graph % :label)) %)
                 (graph/in-edges graph var))
@@ -139,53 +139,55 @@
   ([q rules]
    (let [query (ds.p/parse-query q)
          rule-data (ds.p/parse-rules rules)
-         rule-graphs (reduce
-                      (fn [graphs rule]
-                        (let [rule-name (get-val (:name rule))
-                              branches
-                              (reduce
-                                (fn [branches branch]
-                                  (let [inputs (into
-                                                (mapv get-val
-                                                      (-> branch :vars :required))
-                                                (mapv get-val
-                                                      (-> branch :vars :free)))
-                                        graph (build-query-graph
-                                               inputs (:clauses branch))
-                                        required-vars (into []
-                                                            (comp
-                                                             (map-indexed vector)
-                                                             (filter (fn [[_idx var]] (is-var-required? graph var)))
-                                                             (map first))
-                                                            inputs)
-                                        recursive-nodes (filterv #(and (= :rule (graph/attr graph % :type))
-                                                                       (= rule-name (graph/attr graph % :fn)))
-                                                                 (graph/nodes graph))
-                                        graph (reduce
-                                               #(graph/add-attr %1 %2 :rule-feedback rule-name)
-                                               graph
-                                               recursive-nodes)
-                                        recursive? (boolean (seq recursive-nodes))]
-                                    (conj branches
-                                          {:args inputs
-                                           :required-args (set required-vars)
-                                           :graph graph
-                                           :recursive? recursive?})))
-                               []
-                               (:branches rule))
-                              recursive? (reduce
-                                          (fn [v {:keys [recursive?]}]
-                                            (if (true? recursive?)
-                                              (reduced true)
-                                              v))
-                                          false
-                                          branches)]
-                          (assoc graphs rule-name
-                                 {:recursive? recursive?
-                                  :branches branches
-                                  :required-vars (reduce into #{} (eduction (map :required-args) branches))})))
-                      {}
-                      rule-data)
+         rule-graphs
+         (reduce
+          (fn [graphs rule]
+            (let [rule-name (get-val (:name rule))
+                  branches
+                  (reduce
+                   (fn [branches branch]
+                     (let [inputs (into
+                                   (mapv get-val
+                                         (-> branch :vars :required))
+                                   (mapv get-val
+                                         (-> branch :vars :free)))
+                           graph (build-query-graph
+                                  inputs (:clauses branch))
+                           required-vars (into []
+                                               (comp
+                                                (map-indexed vector)
+                                                (filter (fn [[_idx var]]
+                                                          (is-var-required? graph var)))
+                                                (map first))
+                                               inputs)
+                           recursive-nodes (filterv #(and (= :rule (graph/attr graph % :type))
+                                                          (= rule-name (graph/attr graph % :fn)))
+                                                    (graph/nodes graph))
+                           graph (reduce
+                                  #(graph/add-attr %1 %2 :rule-feedback rule-name)
+                                  graph
+                                  recursive-nodes)
+                           recursive? (boolean (seq recursive-nodes))]
+                       (conj branches
+                             {:args inputs
+                              :required-args (set required-vars)
+                              :graph graph
+                              :recursive? recursive?})))
+                   []
+                   (:branches rule))
+                  recursive? (reduce
+                              (fn [v {:keys [recursive?]}]
+                                (if (true? recursive?)
+                                  (reduced true)
+                                  v))
+                              false
+                              branches)]
+              (assoc graphs rule-name
+                     {:recursive? recursive?
+                      :branches branches
+                      :required-vars (reduce into #{} (eduction (map :required-args) branches))})))
+          {}
+          rule-data)
          inputs (let [vars (transient [])]
                   (walk/postwalk
                    #(condp = (type %)

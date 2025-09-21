@@ -255,7 +255,7 @@
     (is (match? {[:not-found false] true} output))))
 
 (deftest test-or-join-5
-  (let [q '[:find ?a ?arg ?action-type ?o ?det
+  (let [q '[:find ?a ?arg ?o ?det
             :where
             [?a :action/arg ?arg]
             [?a :action/type ?action-type]
@@ -324,16 +324,13 @@
                             [:action-3 :action/arg "desc" 124 true]]
                            ;; :print? true
                            )
-        _ (caudex.utils/circuit->map circuit)
         output-2 (last (impl/get-output-stream circuit))]
+    (is (match?
+         {[:action-2 "desc" :obj "detailed desc"] true}
+         output))
 
-    (prn output output-2)
-    #_(is (match?
-           {[:obj "desc" :inspect "detailed desc"] true}
-           output))
-
-    #_(is (match?
-           {[:object-not-found "desc" :inspect :no-description] true}
+    (is (match?
+           {[:action-3 "desc" :object-not-found :no-description] true}
            output-2))))
 
 
@@ -414,7 +411,8 @@
                  circuit
                  [["action" :action/type :move 124 true]
                   ["action" :action/arg :north 124 true]])
-        output (impl/get-output-stream circuit)]
+        output (impl/get-output-stream circuit)
+        _ (caudex.utils/circuit->map circuit)]
     ;; (utils/prn-graph ccircuit)
     ;; (impl/prn-circuit circuit)
     (prn output)))
@@ -452,7 +450,8 @@
         ccircuit (c/build-circuit q rules)
         circuit (impl/reify-circuit ccircuit)
         circuit (impl/step circuit tx-data)
-        output-2 (last (impl/get-output-stream circuit))]
+        output-2 (last (impl/get-output-stream circuit))
+        ]
     (is (match?
          {[1] true, [3] true}
          output))
@@ -461,7 +460,43 @@
          output'))
     (is (match?
          {[2] true}
-         output-2))))
+         output-2))
+    ))
+
+
+(deftest test-rules-free-vars
+  (let [q '[:find ?c ?a
+            :in $ %
+            :where
+            (rule ?a :const)
+            [?c :attr ?a]]
+        rules '[[(rule ?c ?v)
+                 [?c :attr-2 ?v]]]
+        ccircuit (c/build-circuit q rules)
+        circuit (impl/reify-circuit ccircuit)
+        tx-data [[1 :attr 2 123 true]
+                 [2 :attr-2 :const 123 true]
+                 [3 :attr 4 123 true]]
+        circuit (impl/step circuit tx-data)
+        _ (caudex.utils/circuit->map circuit)
+        output (last (impl/get-output-stream circuit))
+        rules '[[(rule ?c ?v)
+                 [?c :attr-2 10]
+                 (or-join [?v]
+                          [(= ?v :const)]
+                          [(= ?v :val2)])]]
+        ccircuit (c/build-circuit q rules)
+        circuit (impl/reify-circuit ccircuit)
+        tx-data [[1 :attr 2 123 true]
+                 [2 :attr-2 10 123 true] ;;matches
+                 ;; no match
+                 [4 :attr 3 123 true]]
+        circuit (impl/step circuit tx-data)
+        output-2 (last (impl/get-output-stream circuit))
+        ]
+    (is (match? {[1 2] true} output))
+    (is (match? {[1 2] true} output-2))
+    ))
 
 (deftest test-disjoint-not-join
   (let [q '[:find ?o ?accessible
@@ -486,16 +521,16 @@
                                          [?o :object/loc ?l]))
                       [(ground :not-accessible) ?accessible]))]
         ccircuit (c/build-circuit q)
-        _ (caudex.utils/prn-graph ccircuit)
+        ;_ (caudex.utils/prn-graph ccircuit)
         circuit (impl/reify-circuit ccircuit)
         circuit (impl/step circuit
                            [[:obj :object/desc "desc" 123 true]
                             [:obj :object/loc :loc 123 true]
                             [:player :object/desc "player" 123 true]
                             [:player :object/loc :loc-2 123 true]] 
-                           ;:print? true
+                                        ;:print? true
                            )
-        ;not-accessible
+                                        ;not-accessible
         output (last (impl/get-output-stream circuit))
         circuit (impl/step circuit
                            [[:player :object/loc :loc 123 true]
@@ -504,4 +539,5 @@
                            )
                                         ;accessible
         output-2 (last (impl/get-output-stream circuit))]
-    (prn output output-2)))
+    (is (match? {[:obj :not-accessible] true} output))
+    (is (match? {[:obj :accessible] true, [:obj :not-accessible] false} output-2))))
