@@ -20,7 +20,7 @@
     (:value v)
     datascript.parser.Placeholder
     '_))
-#trace
+
 (defn- is-var-required? [graph var]
   (if (or (some #(when (= :binding (graph/attr graph % :label)) %)
                 (graph/in-edges graph var))

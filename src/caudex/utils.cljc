@@ -265,8 +265,34 @@
 (defn datafy-circuit [circuit]
   (mapv #(mapv datafy %)
         (topsort-circuit circuit :stratify? true)))
-
- 
+#trace
+ (defn remap-nodes
+   ([g rename-map]
+    (remap-nodes g rename-map (keys rename-map)))
+   ([g rename-map nodes]
+    (reduce
+     (fn [g node]
+       (let [next-nodes (into []
+                              (comp
+                               (map :dest)
+                               (filter #(contains? #{:or-join :not-join} (graph/attr g % :type)))
+                               (map #(if (graph/is-graph? %)
+                                       [%]
+                                       (mapv :dest
+                                             (filterv (fn [edge]
+                                                        (= :conj (graph/attr g edge :label)))
+                                                      (graph/out-edges g %)))))
+                               cat)
+                              (graph/out-edges g node))
+             replacement (if (graph/is-graph? node)
+                           (remap-nodes node rename-map)
+                           (get rename-map node))
+             g (graph/replace-node g node replacement)]
+         (if (seq next-nodes)
+           (remap-nodes g rename-map next-nodes)
+           g)))
+     g
+     nodes))) 
 
 #_(defn get-heirarchy [circuit op-id]
     (let [           ;strata (topsort-circuit circuit :stratify? true)

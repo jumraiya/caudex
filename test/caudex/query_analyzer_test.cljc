@@ -160,3 +160,22 @@
             [[{:src '?a} nil] [{:src '?b} true]])
            edges-2))
       (is (match? [[{:src '?c} true]] edges-3)))))
+#trace
+(deftest test-remap-nodes
+  (let [query '[:find ?a ?b
+                :in $ %
+                :where
+                [?a :attr 10]
+                (rule ?a ?b)]
+        rules '[[(rule ?p ?q)
+                 [?q :attr-2 :test]
+                 (or-join [?p]
+                          [(= ?p :a)]
+                          [(= ?p :b)])
+                 #_(not-join [?p]
+                             [?p :attr-3 ?r]
+                             [(> ?r 1)])]]
+        {:keys [graph rules]} (q/analyze query rules)
+        graph (-> rules (get 'rule) :branches first :graph)
+        graph (utils/remap-nodes graph {'?a '?p '?b '?q})]
+    (utils/prn-graph graph)))

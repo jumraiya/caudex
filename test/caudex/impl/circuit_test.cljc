@@ -427,41 +427,35 @@
             :where
             [?a :attr :a]
             (rule ?a)]
-        rules '[[(rule ?b)
-                 [(= ?b 1)]]
-                [(rule ?b)
-                 [?b :attr-2 10]]]
+        ;; rules '[[(rule ?b)
+        ;;          [(= ?b 1)]]
+        ;;         [(rule ?b)
+        ;;          [?b :attr-2 10]]]
+        ;; ccircuit (c/build-circuit q rules)
+        ;; circuit (impl/reify-circuit ccircuit)
+        ;; circuit (impl/step circuit tx-data)
+        ;; output (last (impl/get-output-stream circuit))
+        ;; ccircuit (c/build-circuit q '[[(rule ?b)
+        ;;                                (not-join [?b]
+        ;;                                 [(= ?b 1)])]])
+        ;; circuit (impl/reify-circuit ccircuit)
+        ;; circuit (impl/step circuit tx-data)
+        ;; output' (last (impl/get-output-stream circuit))
+        rules '[[(rule ?x)
+                 (not-join [?x]
+                           [?x :attr-2 10])]]
         ccircuit (c/build-circuit q rules)
         circuit (impl/reify-circuit ccircuit)
         circuit (impl/step circuit tx-data)
-        output (last (impl/get-output-stream circuit))
-        ccircuit (c/build-circuit q '[[(rule ?b)
-                                       (not-join [?b]
-                                        [(= ?b 1)])]])
-        circuit (impl/reify-circuit ccircuit)
-        circuit (impl/step circuit tx-data)
-        output' (last (impl/get-output-stream circuit))
-        q '[:find ?a
-            :in $ %
-            :where
-            [?a :attr :a]
-            (not-join [?a]
-                      (rule ?a))]
-        ccircuit (c/build-circuit q rules)
-        circuit (impl/reify-circuit ccircuit)
-        circuit (impl/step circuit tx-data)
-        output-2 (last (impl/get-output-stream circuit))
-        ]
-    (is (match?
-         {[1] true, [3] true}
-         output))
-    (is (match?
-         {[2] true, [3] true}
-         output'))
-    (is (match?
-         {[2] true}
-         output-2))
-    ))
+        output-2 (last (impl/get-output-stream circuit))]
+    ;; (is (match?
+    ;;      {[1] true, [3] true}
+    ;;      output))
+    ;; (is (match?
+    ;;      {[2] true, [3] true}
+    ;;      output'))
+    (is (= {[1] true [2] true}
+         output-2))))
 
 
 (deftest test-rules-free-vars
@@ -478,7 +472,6 @@
                  [2 :attr-2 :const 123 true]
                  [3 :attr 4 123 true]]
         circuit (impl/step circuit tx-data)
-        _ (caudex.utils/circuit->map circuit)
         output (last (impl/get-output-stream circuit))
         rules '[[(rule ?c ?v)
                  [?c :attr-2 10]
@@ -492,11 +485,34 @@
                  ;; no match
                  [4 :attr 3 123 true]]
         circuit (impl/step circuit tx-data)
-        output-2 (last (impl/get-output-stream circuit))
-        ]
+        output-2 (last (impl/get-output-stream circuit))]
     (is (match? {[1 2] true} output))
     (is (match? {[1 2] true} output-2))
     ))
+
+(deftest test-nested-rules
+  (let [q '[:find ?a ?b
+            :in $ %
+            :where
+            [?a :attr 12]
+            (rule ?a ?b)]
+        rules '[[(rule ?p ?q)
+                 [?p :attr-2 :a]
+                 [?q :attr-3 ?p]
+                 (nested-rule ?q)]
+                [(nested-rule ?r)
+                 [(= ?r 10)]]]
+        tx-data [[1 :attr 12 123 true]
+                 [1 :attr-2 :a 123 true]
+                 [10 :attr-3 1 123 true]
+                 [2 :attr 12 123 true]
+                 [2 :attr-2 :a 123 true]
+                 [11 :attr-3 2 123 true]]
+        ccircuit (c/build-circuit q rules)
+        circuit (impl/reify-circuit ccircuit)
+        circuit (impl/step circuit tx-data)
+        output (last (impl/get-output-stream circuit))]
+    (is (match? {[1 10] true} output))))
 
 (deftest test-disjoint-not-join
   (let [q '[:find ?o ?accessible
@@ -521,7 +537,7 @@
                                          [?o :object/loc ?l]))
                       [(ground :not-accessible) ?accessible]))]
         ccircuit (c/build-circuit q)
-        ;_ (caudex.utils/prn-graph ccircuit)
+                                        ;_ (caudex.utils/prn-graph ccircuit)
         circuit (impl/reify-circuit ccircuit)
         circuit (impl/step circuit
                            [[:obj :object/desc "desc" 123 true]

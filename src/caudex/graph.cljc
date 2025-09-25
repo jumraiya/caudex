@@ -127,3 +127,18 @@
                                   (edges g))}))
 (defn terminal-nodes [g]
   (filterv #(= 0 (out-degree g %)) (nodes g)))
+#trace
+ (defn replace-node [g node replacement]
+   (if (true?
+        (some #(when (= % node) true) (nodes g)))
+     (let [i-edges (in-edges g node)
+           o-edges (out-edges g node)]
+       (reduce
+        #(add-directed-edges %1 [replacement (:dest %2) (attrs g %2)])
+        (reduce
+         #(add-directed-edges %1 [(:src %2) replacement (attrs g %2)])
+         (cond-> (add-nodes-with-attrs g [replacement (attrs g node)])
+           (not= node replacement) (remove-nodes node))
+         i-edges)
+        o-edges))
+     g))

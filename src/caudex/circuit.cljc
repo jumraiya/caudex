@@ -210,26 +210,7 @@
                                 [circuit
                                  (-> (reduce disj frontier static-ops)
                                      (conj op))])
-                              [circuit frontier])
-         ;; anti-joins (filterv #(= :anti-join (dbsp/-get-op-type %)) frontier)
-         ;; [circuit frontier] (if (seq anti-joins)
-         ;;                      (reduce
-         ;;                       (fn [[circuit frontier] anti-join-op]
-         ;;                         (let [input-ops (filterv #(and (not= :anti-join (dbsp/-get-op-type %))
-         ;;                                                        (ops-overlap? % anti-join-op))
-         ;;                                                  frontier)]
-         ;;                           (if (seq input-ops)
-         ;;                             (let [[circuit input-op] (join-ops-seq circuit input-ops)
-         ;;                                   [circuit output-op] (join-ops circuit input-op anti-join-op)]
-         ;;                               [circuit (-> (reduce #(disj %1 %2) frontier input-ops)
-         ;;                                            (disj input-op anti-join-op)
-         ;;                                            (conj output-op))])
-         ;;                             #_(throw (Exception. "No matching ops found for anti-join"))
-         ;;                             [circuit frontier])))
-         ;;                       [circuit frontier]
-         ;;                       anti-joins)
-         ;;                      [circuit frontier])
-         ]
+                              [circuit frontier])]
      (loop [circuit circuit frontier frontier]
        (if-let [overlapping-pair (some (fn [op1]
                                          (some (fn [op2]
@@ -545,7 +526,7 @@
                                                   (let [op-output (-> op dbsp/-get-output-type dbsp/-to-vector set)
                                                         [c new-op] (project-vars-from-op
                                                                     sub-circuit op
-                                                                    (sort
+                                                                    (sort-by name
                                                                      (set/intersection
                                                                       arg-set
                                                                       op-output))
@@ -600,14 +581,24 @@
                    (graph/out-edges query-graph or-join-body))]
     (handle-or-join* circuit frontier args rules input-ops branches)))
 
+
+
 #trace
  (defn- handle-rule-clause [circuit frontier args rules input-op-map rule-name]
-   (let [branches (mapv :graph (get-in rules [rule-name :branches]))
-         rule-args (-> rules (get rule-name) :branches first :args)
-         rename-map (zipmap (mapv first args) rule-args)
-         ;(filterv #(symbol? (key %)) (zipmap (mapv first args) rule-args))
+   (let [;; branches (mapv :graph (get-in rules [rule-name :branches]))
+         ;; rule-args (-> rules (get rule-name) :branches first :args)
+         ;; rename-map (zipmap (mapv first args) rule-args)
+         branches (into []
+                        (comp
+                         (map #(let [rule-args (:args %)
+                                     rename-map (zipmap rule-args (mapv first args))
+                                     body (:graph %)]
+                                 (utils/remap-nodes body rename-map))))
+                        (get-in rules [rule-name :branches]))
          [circuit input-ops]
-         (mk-input-ops circuit frontier args input-op-map rename-map)]
+         (mk-input-ops circuit frontier args input-op-map
+                       ;rename-map
+                       )]
      (handle-or-join* circuit frontier args rules input-ops branches)))
 
 
