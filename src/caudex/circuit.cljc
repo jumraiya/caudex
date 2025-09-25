@@ -582,7 +582,6 @@
     (handle-or-join* circuit frontier args rules input-ops branches)))
 
 
-
 #trace
  (defn- handle-rule-clause [circuit frontier args rules input-op-map rule-name]
    (let [;; branches (mapv :graph (get-in rules [rule-name :branches]))
