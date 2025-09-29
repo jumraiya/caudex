@@ -427,20 +427,20 @@
             :where
             [?a :attr :a]
             (rule ?a)]
-        ;; rules '[[(rule ?b)
-        ;;          [(= ?b 1)]]
-        ;;         [(rule ?b)
-        ;;          [?b :attr-2 10]]]
-        ;; ccircuit (c/build-circuit q rules)
-        ;; circuit (impl/reify-circuit ccircuit)
-        ;; circuit (impl/step circuit tx-data)
-        ;; output (last (impl/get-output-stream circuit))
-        ;; ccircuit (c/build-circuit q '[[(rule ?b)
-        ;;                                (not-join [?b]
-        ;;                                 [(= ?b 1)])]])
-        ;; circuit (impl/reify-circuit ccircuit)
-        ;; circuit (impl/step circuit tx-data)
-        ;; output' (last (impl/get-output-stream circuit))
+        rules '[[(rule ?b)
+                 [(= ?b 1)]]
+                [(rule ?b)
+                 [?b :attr-2 10]]]
+        ccircuit (c/build-circuit q rules)
+        circuit (impl/reify-circuit ccircuit)
+        circuit (impl/step circuit tx-data)
+        output (last (impl/get-output-stream circuit))
+        ccircuit (c/build-circuit q '[[(rule ?b)
+                                       (not-join [?b]
+                                        [(= ?b 1)])]])
+        circuit (impl/reify-circuit ccircuit)
+        circuit (impl/step circuit tx-data)
+        output' (last (impl/get-output-stream circuit))
         rules '[[(rule ?x)
                  (not-join [?x]
                            [?x :attr-2 10])]]
@@ -448,12 +448,12 @@
         circuit (impl/reify-circuit ccircuit)
         circuit (impl/step circuit tx-data)
         output-2 (last (impl/get-output-stream circuit))]
-    ;; (is (match?
-    ;;      {[1] true, [3] true}
-    ;;      output))
-    ;; (is (match?
-    ;;      {[2] true, [3] true}
-    ;;      output'))
+    (is (match?
+         {[1] true, [3] true}
+         output))
+    (is (match?
+         {[2] true, [3] true}
+         output'))
     (is (= {[1] true [2] true}
          output-2))))
 
