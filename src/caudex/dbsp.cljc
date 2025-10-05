@@ -105,7 +105,8 @@
                 :cljs cljs.core/PersistentVector)
   ZSetType
   (-to-vector [this] this)
-  (-get-joined-type [this new-type] (into this new-type))
+  (-get-joined-type [this new-type]
+    (into this new-type))
   (-get-join-constraints [this new-type]
     (find-constraints this new-type)))
 

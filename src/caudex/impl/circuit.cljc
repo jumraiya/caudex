@@ -65,7 +65,7 @@
                    v]
                   [k v]))))
         (first zsets)))
-#trace
+
 (defn- step-op [op streams print?]
   (let [zsets (mapv last streams)
         res (case (dbsp/-get-op-type op)
@@ -82,7 +82,7 @@
                                       res (apply (:mapping-fn op) args)]
                                   (if indices-used?
                                     [(conj row res) add?]
-                                     ;; If no indices were used, simply return the result
+                                    ;; If no indices were used, simply return the result
                                     [[res] true]))))
                          (first zsets))
               :neg (update-vals (first zsets) not)
@@ -110,7 +110,7 @@
                       (first zsets))
               :add (add-zsets (first zsets) (second zsets)))]
     (when print?
-      #_(println (str "(" (:id op) " "
+      (println (str "(" (:id op) " "
                     (clojure.string/join
                      " "
                      (mapv #(with-out-str (prn %)) zsets))

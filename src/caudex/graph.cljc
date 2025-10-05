@@ -87,9 +87,34 @@
                (add-attrs g {:src src :dest dest} attrs)
                g))))
 
+;; For some reason loaded loom function does not work correctly
+(defn- remove-nodes-cljs [graph nodes]
+  #?(:cljs
+     (let [remove-adj-nodes (fn [m nodes adjacents remove-fn]
+                              (reduce
+                               (fn [m n]
+                                 (if (m n)
+                                   (update-in m [n] #(apply remove-fn % nodes))
+                                   m))
+                               (apply dissoc m nodes)
+                               adjacents))
+           remove-nodes (fn [g nodes]
+                          (let [ins (mapcat #(loom/predecessors g %) nodes)
+                                outs (mapcat #(loom/successors g %) nodes)]
+                            (-> g
+                                (update-in [:nodeset] #(apply disj % nodes))
+                                (assoc :adj (remove-adj-nodes (:adj g) nodes ins disj))
+                                (assoc :in (remove-adj-nodes (:in g) nodes outs disj)))))]
+       (remove-nodes graph nodes))))
+
 (defn remove-nodes [graph & nodes]
+  ;(prn "removing" nodes "from" graph)
   #?(:clj (apply uber/remove-nodes (into [graph] nodes))
-     :cljs (apply loom/remove-nodes (into [graph] nodes))))
+     :cljs (let [g (if (seq nodes)
+                     (remove-nodes-cljs graph nodes)
+                     graph)]
+             ;(prn g)
+             g)))
 
 (defn add-nodes [graph & nodes]
   #?(:clj (apply uber/add-nodes (into [graph] nodes))
@@ -129,7 +154,6 @@
   (filterv #(= 0 (out-degree g %)) (nodes g)))
 
 
-#trace
  (defn replace-node [g node replacement]
    (reduce
     (fn [g edge]
@@ -151,3 +175,38 @@
          o-edges))
       g)
     (edges g)))
+
+
+(comment
+  (defn- remove-adj-nodes [m nodes adjacents remove-fn]
+    (reduce
+     (fn [m n]
+       (if (m n)
+         (update-in m [n] #(apply remove-fn % nodes))
+         m))
+     (apply dissoc m nodes)
+     adjacents))
+
+  #_(defn- remove-nodes [g nodes]
+      (let [nbrs (mapcat #(loom/successors g %) nodes)]
+        (-> g
+            (update-in [:nodeset] #(apply disj % nodes))
+            (assoc :adj (remove-adj-nodes (:adj g) nodes nbrs disj)))))
+
+  #_(defn- remove-nodes [g nodes]
+      (let [ins (mapcat #(loom/predecessors g %) nodes)
+            outs (mapcat #(loom/successors g %) nodes)]
+        (-> g
+            (update-in [:nodeset] #(apply disj % nodes))
+            (assoc :adj (remove-adj-nodes (:adj g) nodes ins dissoc))
+            (assoc :in (remove-adj-nodes (:in g) nodes outs disj)))))
+
+  (def g (add-directed-edges
+          (new-graph)
+          ['?a '?b {:label "asd"}]))
+
+  (prn (remove-nodes g '?a))
+  ;; shadowed vversion works
+  (prn (remove-nodes g (list '?b)))
+  ;; does not work
+  (prn (loom/remove-nodes g '?a)))

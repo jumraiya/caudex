@@ -199,11 +199,12 @@
                                 [?a :attr-2 :asd])
                       [(ground :branch-3) ?b]))]
         ccircuit (c/build-circuit q)
+        _ (caudex.utils/prn-graph ccircuit)
         circuit (impl/reify-circuit ccircuit)
         circuit (impl/step circuit [[1 :attr 10 123 true]
                                     [1 :attr-2 :asd 123 true]])
         output (last (impl/get-output-stream circuit))
-        circuit (impl/step circuit [[2 :attr 10 124 true]] :print? true)
+        circuit (impl/step circuit [[2 :attr 10 124 true]])
         output-2 (last (impl/get-output-stream circuit))]
     (is (match?
          {[1 :branch-1] true}
@@ -473,6 +474,9 @@
                  [3 :attr 4 123 true]]
         circuit (impl/step circuit tx-data)
         output (last (impl/get-output-stream circuit))
+
+            ;; (rule ?a :const)
+            ;; [?c :attr ?a]
         rules '[[(rule ?c ?v)
                  [?c :attr-2 10]
                  (or-join [?v]
@@ -486,10 +490,11 @@
                  [4 :attr 3 123 true]]
         circuit (impl/step circuit tx-data)
         output-2 (last (impl/get-output-stream circuit))]
-    (is (match? {[1 2] true} output))
-    (is (match? {[1 2] true} output-2))
-    ))
+    (is (= {[1 2] true} output))
+    (is (= {[1 2] true} output-2))))
 
+;(clojure.test/run-test test-rules-free-vars)
+                                        ;(clojure.test/run-test test-nested-rules)
 (deftest test-nested-rules
   (let [q '[:find ?a ?b
             :in $ %
@@ -557,3 +562,5 @@
         output-2 (last (impl/get-output-stream circuit))]
     (is (match? {[:obj :not-accessible] true} output))
     (is (match? {[:obj :accessible] true, [:obj :not-accessible] false} output-2))))
+
+;(clojure.test/run-test test-disjoint-not-join)

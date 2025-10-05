@@ -71,39 +71,48 @@
              (dbsp/-get-id n)
              n)))
     "nil"))
-#trace
+
  (defn circuit->map [circuit]
-   (let [ccircuit (if (and (map? circuit) (contains? circuit :circuit))
-                    (:circuit circuit)
-                    circuit)
-         id #(str (if (is-op? %) (dbsp/-get-id %) %))
-         label #(str (if (is-op? %) (str (dbsp/-get-id %)
+  (let [ccircuit (if (and (map? circuit) (contains? circuit :circuit))
+                   (:circuit circuit)
+                   circuit)
+        id #(str (if (is-op? %) (dbsp/-get-id %) %))
+        label #(str (if (is-op? %) (str (dbsp/-get-id %)
                                         ;; (dbsp/-get-input-types %)
-                                         " "
-                                         (dbsp/-get-output-type %))
-                         %))
-         nodes (mapv #(hash-map "id" (id %)
-                                #_(first (get ids (:id %)))
-                                "label" (label %)
-                                #_(display-node g (second (get ids (:id %)))))
-                     (graph/nodes ccircuit))
-         edges (mapv #(hash-map "from" (-> % :src id)
-                                #_(first (get ids (-> % :src :id)))
-                                "to" (-> % :dest id)
-                                #_(first (get ids (->  % :dest :id))))
-                     (graph/edges ccircuit))
-         tx-data->zset #(into {}
+                                        " "
+                                        (dbsp/-get-output-type %))
+                        %))
+        nodes (mapv #(hash-map "id" (id %)
+                               #_(first (get ids (:id %)))
+                               "label" (label %)
+                               #_(display-node g (second (get ids (:id %)))))
+                    (graph/nodes ccircuit))
+        edges (mapv #(hash-map "from" (-> % :src id)
+                               #_(first (get ids (-> % :src :id)))
+                               "to" (-> % :dest id)
+                               #_(first (get ids (->  % :dest :id))))
+                    (graph/edges ccircuit))
+        tx-data->zset #(into {}
                              (map (fn [[e a v _tx add?]]
                                     [[e a v] add?]))
                              %)
-         data     (cond->
-                      {:nodes nodes :edges edges}
-                      (contains? circuit :streams)
-                      (assoc :streams (update (:streams circuit) -1
-                                              #(mapv (fn [c] (tx-data->zset c)) %))
-                             :op-stream-map (:op-stream-map circuit)))]
-     (spit "circuit_data.json" (json/write-str data))
-     data))
+        data     (cond->
+                  {:nodes nodes :edges edges}
+                   (contains? circuit :streams)
+                   (assoc :streams (update (:streams circuit) -1
+                                           #(mapv (fn [c] (tx-data->zset c)) %))
+                          :op-stream-map (:op-stream-map circuit)))]
+    #?(:clj (spit "circuit_data.json" (json/write-str data))
+       :cljs
+        (let [json-str (js/JSON.stringify (clj->js data) nil 2)
+              blob (js/Blob. #js [json-str] #js {:type "application/json"})
+              url (js/URL.createObjectURL blob)
+              link (.createElement js/document "a")]
+          (set! (.-href link) url)
+          (set! (.-download link) "circuit_data.json")
+          (.click link)
+          (js/URL.revokeObjectURL url)))
+    data))
 
 
 
@@ -265,7 +274,7 @@
 (defn datafy-circuit [circuit]
   (mapv #(mapv datafy %)
         (topsort-circuit circuit :stratify? true)))
-#trace
+
  (defn remap-nodes
    ([g rename-map]
     (remap-nodes g rename-map (keys rename-map)))
