@@ -89,13 +89,19 @@
               :delay (or (-> streams first butlast last) {})
               :delay-feedback (first zsets)
               :integrate (add-zsets (first zsets) (or (second zsets) {}))
-              :join (into {}
-                          (for [row-1 (first zsets) row-2 (second zsets)
-                                :when (or (empty? (:join-conds op))
-                                          (every?
-                                           #(dbsp/-satisfies? % (into (key row-1) (key row-2)))
-                                           (:join-conds op)))]
-                            [(into (key row-1) (key row-2)) (and (val row-1) (val row-2))]))
+              :join #trace (let [get-val #(if (is-idx? %2)
+                                            (nth %1 (:idx %2))
+                                            %2)]
+                             (into {}
+                                   (for [row-1 (first zsets) row-2 (second zsets)
+                                         :when (or (empty? (:join-conds op))
+                                                   (every?
+                                                    #(apply (dbsp/-get-pred %)
+                                                            [(get-val (key row-1) (-> % dbsp/-get-args first))
+                                                             (get-val (key row-2) (-> % dbsp/-get-args second))])
+                                               ;; #(dbsp/-satisfies? % (into (key row-1) (key row-2)))
+                                                    (:join-conds op)))]
+                                     [(into (key row-1) (key row-2)) (and (val row-1) (val row-2))])))
               :anti-join (first zsets)
               #_(into {}
                       (filter (fn [row-1]

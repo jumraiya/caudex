@@ -37,6 +37,10 @@
 ;; Describes an value derived from an product type
 (defrecord ValIndex [idx])
 
+
+(defn is-idx? [v]
+  (= caudex.dbsp.ValIndex (type v)))
+
 ;; Assumes constraint is defined as [pred-fn val-index-1 val-index-2]
 (extend-type #?(:clj clojure.lang.PersistentVector
                 :cljs cljs.core/PersistentVector)
@@ -67,8 +71,8 @@
                       {}
                       %1)
         indices-1 (collect-pos (-to-vector zset-type-1) 0)
-        indices-2 (collect-pos (-to-vector zset-type-2)
-                               (count (-to-vector zset-type-1)))]
+        indices-2 (collect-pos (-to-vector zset-type-2) 0
+                               #_(count (-to-vector zset-type-1)))]
     (reduce
      (fn [constraints [var indices]]
        (into constraints

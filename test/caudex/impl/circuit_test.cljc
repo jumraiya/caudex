@@ -199,7 +199,6 @@
                                 [?a :attr-2 :asd])
                       [(ground :branch-3) ?b]))]
         ccircuit (c/build-circuit q)
-        _ (caudex.utils/prn-graph ccircuit)
         circuit (impl/reify-circuit ccircuit)
         circuit (impl/step circuit [[1 :attr 10 123 true]
                                     [1 :attr-2 :asd 123 true]])
@@ -263,15 +262,6 @@
             [?a :action/type :inspect]
             (not-join [?a]
                       [?a :action/inspect-processed? true])
-            #_(or-join [?a]
-                       (and
-                        [?a :action/type :inspect]
-                        (not-join [?a]
-                                  [?a :action/inspect-processed? true]))
-                       (and
-                        [?a :action/type :pickup]
-                        (not-join [?a]
-                                  [?a :action/pickup-processed? true])))
             (or-join [?o ?arg ?det]
                      (and
                       [(not= ?arg "player")]
@@ -298,9 +288,10 @@
                                                    [?o :object/location ?l]))))
                       [(ground :object-not-found) ?o]
                       [(ground :no-description) ?det]))]
-        ccircuit (c/build-circuit q)
+        ;; ccircuit (c/build-circuit q)
         ;; _ (caudex.utils/prn-graph ccircuit)
-        circuit (impl/reify-circuit ccircuit)
+        ;; circuit (impl/reify-circuit ccircuit)
+        circuit (impl/reify-circuit user/circuit)
         circuit (impl/step circuit
                            [[:obj :object/description "desc" 123 true]
                             [:obj :object/detailed-description "detailed desc" 123 true]
@@ -325,7 +316,9 @@
                             [:action-3 :action/arg "desc" 124 true]]
                            ;; :print? true
                            )
-        output-2 (last (impl/get-output-stream circuit))]
+        output-2 (last (impl/get-output-stream circuit))
+        _ (utils/circuit->map circuit)]
+    (prn output output-2)
     (is (match?
          {[:action-2 "desc" :obj "detailed desc"] true}
          output))
@@ -413,7 +406,8 @@
                  [["action" :action/type :move 124 true]
                   ["action" :action/arg :north 124 true]])
         output (impl/get-output-stream circuit)
-        _ (caudex.utils/circuit->map circuit)]
+        ;_ (caudex.utils/circuit->map circuit)
+        ]
     ;; (utils/prn-graph ccircuit)
     ;; (impl/prn-circuit circuit)
     (prn output)))

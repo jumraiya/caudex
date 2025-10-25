@@ -7,6 +7,7 @@
       :cljs ["vis-network" :as vis])
    #?(:clj [clojure.data.json :as json])))
 
+(defonce debug-data (atom nil))
 
 (defn is-op? [in]
   (satisfies? dbsp/Operator in))
@@ -102,16 +103,17 @@
                    (assoc :streams (update (:streams circuit) -1
                                            #(mapv (fn [c] (tx-data->zset c)) %))
                           :op-stream-map (:op-stream-map circuit)))]
+    (reset! debug-data data)
     #?(:clj (spit "circuit_data.json" (json/write-str data))
        :cljs
-        (let [json-str (js/JSON.stringify (clj->js data) nil 2)
-              blob (js/Blob. #js [json-str] #js {:type "application/json"})
-              url (js/URL.createObjectURL blob)
-              link (.createElement js/document "a")]
-          (set! (.-href link) url)
-          (set! (.-download link) "circuit_data.json")
-          (.click link)
-          (js/URL.revokeObjectURL url)))
+       (let [json-str (js/JSON.stringify (clj->js data) nil 2)
+             blob (js/Blob. #js [json-str] #js {:type "application/json"})
+             url (js/URL.createObjectURL blob)
+             link (.createElement js/document "a")]
+         (set! (.-href link) url)
+         (set! (.-download link) "circuit_data.json")
+         (.click link)
+         (js/URL.revokeObjectURL url)))
     data))
 
 
@@ -183,70 +185,88 @@
                  visited)
           (conj order cur))))))
 
+
 (defn stratified-topsort
-  [circuit & {:keys [start visited visited-check-fn] :or {start (get-root-node circuit) visited #{}}}]
-  (let [queue (into [start]
-                    (filter #(and
-                              (not= start %)
-                              (= 0 (graph/in-degree circuit %))))
-                    (graph/nodes circuit))]
-   (loop [queue queue order [[start]] visited visited]
-     (let [visited (into visited queue)
-           queue (transduce
-                  (comp
-                   (map #(graph/out-edges circuit %))
-                   cat
-                   (map :dest)
-                   (remove #(contains? visited %))
-                   (remove #(contains? (set queue) %))
-                   (filter #(every?
-                             (fn [in]
-                               (or (contains? visited (:src in))
-                                   (and (fn? visited-check-fn)
-                                        (visited-check-fn (:src in) %))))
-                             (graph/in-edges circuit %))))
-                  (completing conj)
-                  []
-                  queue)
-           order (if (seq queue)
-                   (conj order queue)
-                   order)]
-       (if (seq queue)
-         (recur queue
-                order
-                visited)
-         order)))))
+  "Performs a stratified topological sort on a directed acyclic graph.
+   
+   Returns a sequence of strata, where each stratum is a collection of nodes
+   that can be processed in parallel (no dependencies between them within the stratum).
+   
+   Options:
+   - :start-nodes - Collection of nodes to start from (defaults to all root nodes)
+   - :visited-check-fn - Function (dep-node current-node) -> boolean to determine
+                        if a dependency should be ignored for ordering purposes"
+  [g & {:keys [start-nodes visited-check-fn]
+        :or {start-nodes [(get-root-node g)]}}]
+  (let [start-nodes (if (sequential? start-nodes) start-nodes [start-nodes])]
+    (loop [queue (vec start-nodes)
+           strata []
+           visited #{}]
+      (if (empty? queue)
+        strata
+        (let [;; Add current stratum to result
+              strata (conj strata queue)
+              ;; Add current stratum to visited set
+              visited (into visited queue)
+
+              ;; Find next nodes whose dependencies are all satisfied
+              next-candidates (transduce
+                               (comp
+                                (mapcat #(graph/out-edges g %))
+                                (map :dest)
+                                (remove #(contains? visited %))
+                                (distinct))
+                               conj
+                               []
+                               queue)
+              next-queue (filter
+                          (fn [node]
+                            (every?
+                             (fn [in-edge]
+                               (let [dep-node (:src in-edge)]
+                                 (or
+                                  ;; Dependency is already processed
+                                  (contains? visited dep-node)
+                                  ;; Custom check allows ignoring this dependency
+                                  (and visited-check-fn
+                                       (visited-check-fn dep-node node)))))
+                             (graph/in-edges g node)))
+                          next-candidates)]
+
+          (recur (vec next-queue)
+                 strata
+                 visited))))))
 
 
 (defn get-stratified-hierarchy
-   [circuit start]
-   (loop [queue [start] order [[start]] visited #{}]
-     (let [visited (into visited queue)
-           queue (transduce
-                  (comp
-                   (map #(graph/in-edges circuit %))
-                   cat
-                   (map :src)
-                   (remove #(contains? visited %))
-                   (remove #(contains? (set queue) %))
-                   (filter #(every?
-                             (fn [in]
-                               (or (contains? visited (:dest in))
-                                   (and (#{:delay :delay-feedback}
-                                         (-> (:dest in) op->edn :type))
-                                        (some? (graph/find-edge circuit % (:dest in))))))
-                             (graph/out-edges circuit %))))
-                  (completing conj)
-                  []
-                  queue)
-           order (if (seq queue)
-                   (conj order queue)
-                   order)]
-       (if (seq queue)
-         (recur queue
-                order
-                visited)
-         order))))
+  [circuit start]
+  (loop [queue [start] order [[start]] visited #{}]
+    (let [visited (into visited queue)
+          queue (transduce
+                 (comp
+                  (map #(graph/in-edges circuit %))
+                  cat
+                  (map :src)
+                  (remove #(contains? visited %))
+                  (remove #(contains? (set queue) %))
+                  (filter #(every?
+                            (fn [in]
+                              (or (contains? visited (:dest in))
+                                  (and (#{:delay :delay-feedback}
+                                        (-> (:dest in) op->edn :type))
+                                       (some? (graph/find-edge circuit % (:dest in))))))
+                            (graph/out-edges circuit %))))
+                 (completing conj)
+                 []
+                 queue)
+          order (if (seq queue)
+                  (conj order queue)
+                  order)]
+      (if (seq queue)
+        (recur queue
+               order
+               visited)
+        order))))
 
 
 (defn topsort-circuit [circuit & {:keys [stratify?] :as opts}]
