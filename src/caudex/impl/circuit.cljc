@@ -89,7 +89,7 @@
               :delay (or (-> streams first butlast last) {})
               :delay-feedback (first zsets)
               :integrate (add-zsets (first zsets) (or (second zsets) {}))
-              :join #trace (let [get-val #(if (is-idx? %2)
+              :join (let [get-val #(if (is-idx? %2)
                                             (nth %1 (:idx %2))
                                             %2)]
                              (into {}

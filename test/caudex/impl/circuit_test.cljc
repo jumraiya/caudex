@@ -288,10 +288,9 @@
                                                    [?o :object/location ?l]))))
                       [(ground :object-not-found) ?o]
                       [(ground :no-description) ?det]))]
-        ;; ccircuit (c/build-circuit q)
+        ccircuit (c/build-circuit q)
         ;; _ (caudex.utils/prn-graph ccircuit)
-        ;; circuit (impl/reify-circuit ccircuit)
-        circuit (impl/reify-circuit user/circuit)
+        circuit (impl/reify-circuit ccircuit)
         circuit (impl/step circuit
                            [[:obj :object/description "desc" 123 true]
                             [:obj :object/detailed-description "detailed desc" 123 true]
