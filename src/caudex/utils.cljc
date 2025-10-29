@@ -3,8 +3,8 @@
    [caudex.graph :as graph]
    [caudex.dbsp :as dbsp]
    [clojure.core.protocols :refer [datafy]]
-   #?(:clj [com.phronemophobic.clj-graphviz :refer [render-graph]]
-      :cljs ["vis-network" :as vis])
+   ;; #?(:clj [com.phronemophobic.clj-graphviz :refer [render-graph]]
+   ;;    :cljs ["vis-network" :as vis])
    #?(:clj [clojure.data.json :as json])))
 
 (defonce debug-data (atom nil))
@@ -123,39 +123,17 @@
    (prn-graph g "graph"))
   ([g container-id]
    (let [{:keys [nodes edges] :as circuit-map} (circuit->map g)]
-     #?(:clj
-        (render-graph
-         (assoc
-          {:nodes (mapv #(display-node g %) (graph/nodes g))
-           :edges (into []
-                        (map #(hash-map :from (display-node g (:src %))
-                                        :to (display-node g  (:dest %))
-                                        :label (str (get-in (:attrs g) [(:id %) :label]))))
-                        (graph/edges g))}
-          :flags #{:directed} :default-attributes {:edge {:label "label"}} :layout-algorithm :neato))
-        :cljs (let [container (.getElementById js/document container-id)]
-                (js/console.log nodes)
-                (js/console.log edges)
-                (vis/Network. container
-                              (js-obj "nodes" nodes "edges" edges)
-                              (js-obj
-                               {"edges" {"arrows"  {"to" {"enabled" true}}}
-                                "layout" {"hierarchical" {"direction" "UD"
-                                                          "sortMethod" "directed"}}
-
-                                "interaction" {"dragNodes" false}
-                                        ;"physics" {"enabled" false}
-                                ;; "configure" {"filter" (fn [option path]
-                                ;;                         (not= -1 (.indexOf path "hierarchical")))
-                                ;;              ;; function (option, path) {
-                                ;;              ;;                          if (path.indexOf("hierarchical") !== -1) {
-                                ;;              ;;                                                                    return true ;
-                                ;;              ;;                                                                    }
-                                ;;              ;;                          return false ;
-                                ;;              ;;                          },
-                                ;;              "showButton" false}
-
-                                "physics" {"hierarchicalRepulsion" {"avoidOverlap" 1}}})))))))
+     ;; #?(:clj
+     ;;    (render-graph
+     ;;     (assoc
+     ;;      {:nodes (mapv #(display-node g %) (graph/nodes g))
+     ;;       :edges (into []
+     ;;                    (map #(hash-map :from (display-node g (:src %))
+     ;;                                    :to (display-node g  (:dest %))
+     ;;                                    :label (str (get-in (:attrs g) [(:id %) :label]))))
+     ;;                    (graph/edges g))}
+     ;;      :flags #{:directed} :default-attributes {:edge {:label "label"}} :layout-algorithm :neato)))
+     )))
 
 (defn topsort
   [circuit & {:keys [start visited visited-check-fn]

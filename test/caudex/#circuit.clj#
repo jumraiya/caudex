@@ -1,6 +1,0 @@
-(ns caudex.circuit
-  (require ))
-
-
-(deftest test-build-circuit
-  (t))

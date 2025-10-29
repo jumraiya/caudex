@@ -21,9 +21,9 @@
 ;; For not-joins we are only interested in the input zset so we pick the last occurence
 (defn- find-val-idx [op var]
   (let [idx (last-index-of (dbsp/-to-vector (dbsp/-get-output-type op)) var)]
-    (if (some? idx)
+    (when (some? idx)
       (dbsp/->ValIndex idx)
-      (prn (str "Could not find " var " in " (dbsp/-get-output-type op)))
+      ;(prn (str "Could not find " var " in " (dbsp/-get-output-type op)))
                                         ;(throw (Exception. (str "Could not find " var " in " (dbsp/-get-output-type op))))
       )))
 
@@ -150,10 +150,10 @@
 
 (defn- anti-join-ops [circuit input-op not-join-op]
    (let [op-vars (-> input-op (dbsp/-get-output-type) (dbsp/-to-vector))
-         _ (when (static-op? circuit input-op)
-             (prn "Trying to join static op with anti-join")
-             #_(throw #?(:cljs (js/Error. "Trying to join static op with anti-join")
-                       :clj (Exception. "Trying to join static op with anti-join"))))
+         ;; _ (when (static-op? circuit input-op)
+         ;;     (prn "Trying to join static op with anti-join")
+         ;;     #_(throw #?(:cljs (js/Error. "Trying to join static op with anti-join")
+         ;;               :clj (Exception. "Trying to join static op with anti-join"))))
          [circuit joined-output] (join-ops* circuit input-op not-join-op)
          negated (dbsp/->NegOperator
                   (gensym "neg-")
@@ -353,7 +353,7 @@
                         (find-val-idx last-op arg)
                         arg)]
               (if (and (nil? idx) (symbol? arg) required?)
-                #?(:cljs (prn (str "Could not find " arg " in input op"))
+                #?(:cljs (throw js/Error (str "Could not find " arg " in input op"))
                    :clj (throw (Exception. (str "Could not find " arg " in input op"))))
                 idx)))
           args)
@@ -408,7 +408,7 @@
                          [% idx false])
                       sources)))
              _ (when (and (nil? idx) (not (contains? input-op-map in)) required?)
-                 #?(:cljs (prn (str "Could not find input " in))
+                 #?(:cljs (throw js/Error (str "Could not find input " in))
                     :clj (throw (Exception. (str "Could not find input " in)))))]
          (cond
            (some? idx) (let [op (cond-> (dbsp/->FilterOperator
@@ -619,43 +619,44 @@
       [circuit frontier])))
 
  (defn- build-circuit*
-   ([inputs query-graph rules]
-    (build-circuit* inputs query-graph rules nil))
-   ([inputs query-graph rules input-op-map & {:keys [join-unconnected?] :or {join-unconnected? false}}]
-    (let [components (graph/connected-components query-graph)
-          _ (when (and (> (count components) 1) (not join-unconnected?))
-              #?(:cljs (prn "Cannot have disjoint query components")
-                 :clj (prn "Warning disjoint components in query")
-                ;(throw (Exception. "Cannot have disjoint query components"))
-                 ))
-          root (dbsp/->RootOperator (gensym "root-"))
-          circuit (-> (graph/new-graph)
-                      (graph/add-nodes root))
-          [input-op-map connect?]
-          (if (map? input-op-map)
-            [input-op-map false]
-            [(into {}
-                   (map
-                    #(vector
-                      %
-                      (dbsp/->FilterOperator
-                       (gensym "input-")
-                       [::input % %]
-                       [[= ::input (dbsp/->ValIndex 0)]
-                        [= % (dbsp/->ValIndex 1)]]
-                       [(dbsp/->ValIndex 2)])))
-                   inputs)
-             true])
-          circuit (if (and (seq inputs) connect?)
-                    (reduce
-                     #(add-op-inputs %1 (val %2) root)
-                     circuit input-op-map)
-                    (reduce
-                     #(graph/add-nodes %1 (val %2))
-                     circuit (dissoc input-op-map :sources :rename)))
-          [circuit frontier] (join-pattern-clauses circuit query-graph root input-op-map)
-          [circuit frontier] (process-non-pattern-clauses circuit frontier query-graph rules input-op-map)]
-      [circuit frontier])))
+  ([inputs query-graph rules]
+   (build-circuit* inputs query-graph rules nil))
+  ([inputs query-graph rules input-op-map
+     ;& {:keys [join-unconnected?] :or {join-unconnected? false}}
+    ]
+   (let [;; components (graph/connected-components query-graph)
+          ;; _ (when (and (> (count components) 1) (not join-unconnected?))
+          ;;     #?(:cljs (prn "Cannot have disjoint query components")
+          ;;        :clj (prn "Warning disjoint components in query")
+          ;;        ))
+         root (dbsp/->RootOperator (gensym "root-"))
+         circuit (-> (graph/new-graph)
+                     (graph/add-nodes root))
+         [input-op-map connect?]
+         (if (map? input-op-map)
+           [input-op-map false]
+           [(into {}
+                  (map
+                   #(vector
+                     %
+                     (dbsp/->FilterOperator
+                      (gensym "input-")
+                      [::input % %]
+                      [[= ::input (dbsp/->ValIndex 0)]
+                       [= % (dbsp/->ValIndex 1)]]
+                      [(dbsp/->ValIndex 2)])))
+                  inputs)
+            true])
+         circuit (if (and (seq inputs) connect?)
+                   (reduce
+                    #(add-op-inputs %1 (val %2) root)
+                    circuit input-op-map)
+                   (reduce
+                    #(graph/add-nodes %1 (val %2))
+                    circuit (dissoc input-op-map :sources :rename)))
+         [circuit frontier] (join-pattern-clauses circuit query-graph root input-op-map)
+         [circuit frontier] (process-non-pattern-clauses circuit frontier query-graph rules input-op-map)]
+     [circuit frontier])))
 
 (defn build-circuit
   ([query]

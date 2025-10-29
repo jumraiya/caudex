@@ -1,10 +1,9 @@
 (ns caudex.impl.circuit-test
-  (:require [clojure.test :refer [deftest is testing]]
+  (:require [clojure.test :refer [deftest is]]
             [caudex.circuit :as c]
             [caudex.impl.circuit :as impl]
             [matcher-combinators.test]
-            [matcher-combinators.matchers :as m]
-            [caudex.utils :as utils]))
+            [matcher-combinators.matchers :as m]))
 
 
 (deftest simple-join
@@ -67,25 +66,7 @@
     (is (match?
          (m/equals
           [{[1] true}])
-         output)))
-  #_(let [q '[:find ?b
-              :in $ ?in
-              :where
-              (not-join [?b ?in]
-                        [?b :attr-2 ?in])]
-          ccircuit (c/build-circuit q)
-          circuit (impl/reify-circuit ccircuit)
-          tx-data [[2 :attr-2 12 123 true]
-                   [11 :attr-2 10 123 true]
-                   [:caudex.circuit/input '?in 10 123 true]]
-          circuit (impl/step circuit tx-data)
-          output (impl/get-output-stream circuit)]
-      (prn output)
-      (caudex.utils/prn-graph ccircuit)
-      (impl/prn-circuit circuit)
-      (is (match?
-           [{[2] true [11] false}]
-           output))))
+         output))))
 
 (deftest test-not-join-2
   (let [q '[:find ?a
@@ -100,10 +81,10 @@
         circuit (impl/step circuit
                            [[:a :attr-2 10 123 true]
                             [:b :attr-2 10 123 true]
-                            [:c :attr :b 123 true]]
-                           :print? true)
+                            [:c :attr :b 123 true]])
         output (impl/get-output-stream circuit)]
-    (prn output)))
+    (is (= {[:a] true, [:b] true}
+           (last output)))))
 
 
 (deftest test-reify+step-circuit
@@ -141,7 +122,7 @@
                  [2 :attr-1 102 123 true]
                  [3 :attr-1 78 123 true]
                  [3 :attr-2 "asd" 123 true]]
-        circuit (impl/step circuit tx-data :print? true)
+        circuit (impl/step circuit tx-data)
         output (impl/get-output-stream circuit)]
     (is (match?
          [{[1] true [2] true}]
@@ -315,9 +296,7 @@
                             [:action-3 :action/arg "desc" 124 true]]
                            ;; :print? true
                            )
-        output-2 (last (impl/get-output-stream circuit))
-        _ (utils/circuit->map circuit)]
-    (prn output output-2)
+        output-2 (last (impl/get-output-stream circuit))]
     (is (match?
          {[:action-2 "desc" :obj "detailed desc"] true}
          output))
@@ -403,13 +382,9 @@
         circuit (impl/step
                  circuit
                  [["action" :action/type :move 124 true]
-                  ["action" :action/arg :north 124 true]])
-        output (impl/get-output-stream circuit)
-        ;_ (caudex.utils/circuit->map circuit)
-        ]
-    ;; (utils/prn-graph ccircuit)
-    ;; (impl/prn-circuit circuit)
-    (prn output)))
+                  ["action" :action/arg :north 124 true]])]
+    (is (= {["room-b"] true}
+           (last (impl/get-output-stream circuit))))))
 
 (deftest test-rules
   (let [tx-data [[1 :attr :a 123 true]
@@ -555,5 +530,3 @@
         output-2 (last (impl/get-output-stream circuit))]
     (is (match? {[:obj :not-accessible] true} output))
     (is (match? {[:obj :accessible] true, [:obj :not-accessible] false} output-2))))
-
-;(clojure.test/run-test test-disjoint-not-join)
