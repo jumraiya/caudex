@@ -7,6 +7,20 @@ The circuits are mostly based on the theory described in the paper, but it is no
 
 Caudex compiles Datomic-style queries into circuit graphs that can be executed incrementally. It supports pattern matching, joins, predicates, functions, rule, or-joins and not-joins
 
+## Installation
+
+Add to your `deps.edn`:
+
+```clojure
+{:deps {net.clojars.jumraiya/caudex {:mvn/version "0.1.0"}}}
+```
+
+Or for Leiningen, add to your `project.clj`:
+
+```clojure
+[net.clojars.jumraiya/caudex "0.1.0"]
+```
+
 ## Quick Start
 
 ### Building a Simple Circuit

@@ -27,7 +27,7 @@
                        [:url "https://opensource.org/licenses/MIT"]]]
                      [:developers
                       [:developer
-                       [:name "Your Name"]]]
+                       [:name "Jaideep Umraiya"]]]
                      [:scm
                       [:url "https://github.com/jumraiya/caudex"]
                       [:connection "scm:git:https://github.com/jumraiya/caudex.git"]
