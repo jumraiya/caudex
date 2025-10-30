@@ -26,3 +26,19 @@ Caudex compiles Datomic-style queries into circuit graphs that can be executed i
 
 See test/caudex/impl/circuit_test.cljc for advanced usage
 
+## Building a JAR
+
+Build a JAR file:
+
+```bash
+clj -T:build jar
+```
+
+This creates `target/caudex-0.1.0.jar` with proper metadata.
+
+Install to your local Maven repository:
+
+```bash
+clj -T:build install
+```
+

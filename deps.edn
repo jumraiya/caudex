@@ -18,7 +18,8 @@
          :extra-paths ["test"]}
   
   ;; Build tools
-  :build {:deps {io.github.clojure/tools.build {:mvn/version "0.9.4"}}
+  :build {:deps {io.github.clojure/tools.build {:mvn/version "0.9.4"}
+                 slipset/deps-deploy {:mvn/version "0.2.0"}}
           :ns-default build}
   
   ;; Uberjar creation
