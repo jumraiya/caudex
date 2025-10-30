@@ -1,0 +1,101 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
+  <modelVersion>4.0.0</modelVersion>
+
+  <groupId>net.clojars.jumraiya</groupId>
+  <artifactId>caudex</artifactId>
+  <version>0.1.1</version>
+  <packaging>jar</packaging>
+
+  <name>caudex</name>
+  <description>A Clojure library for building DBSP circuits from Datalog queries</description>
+  <url>https://github.com/jumraiya/caudex</url>
+
+  <licenses>
+    <license>
+      <name>MIT License</name>
+      <url>https://opensource.org/licenses/MIT</url>
+    </license>
+  </licenses>
+
+  <developers>
+    <developer>
+      <name>Jaideep Umraiya</name>
+    </developer>
+  </developers>
+
+  <scm>
+    <url>https://github.com/jumraiya/caudex</url>
+    <connection>scm:git:https://github.com/jumraiya/caudex.git</connection>
+    <developerConnection>scm:git:ssh://git@github.com/jumraiya/caudex.git</developerConnection>
+    <tag>v0.1.0</tag>
+  </scm>
+
+  <repositories>
+    <repository>
+      <id>clojars</id>
+      <name>Clojars repository</name>
+      <url>https://clojars.org/repo</url>
+    </repository>
+  </repositories>
+
+  <dependencies>
+    <dependency>
+      <groupId>org.clojure</groupId>
+      <artifactId>clojure</artifactId>
+      <version>1.12.0</version>
+    </dependency>
+    <dependency>
+      <groupId>datascript</groupId>
+      <artifactId>datascript</artifactId>
+      <version>1.7.4</version>
+    </dependency>
+    <dependency>
+      <groupId>ubergraph</groupId>
+      <artifactId>ubergraph</artifactId>
+      <version>0.9.0</version>
+    </dependency>
+  </dependencies>
+
+  <build>
+    <sourceDirectory>src</sourceDirectory>
+    <plugins>
+      <plugin>
+        <groupId>org.apache.maven.plugins</groupId>
+        <artifactId>maven-source-plugin</artifactId>
+        <version>3.2.1</version>
+        <executions>
+          <execution>
+            <id>attach-sources</id>
+            <goals>
+              <goal>jar</goal>
+            </goals>
+          </execution>
+        </executions>
+      </plugin>
+      <plugin>
+        <groupId>org.apache.maven.plugins</groupId>
+        <artifactId>maven-jar-plugin</artifactId>
+        <version>3.3.0</version>
+        <configuration>
+          <includes>
+            <include>**/*.clj</include>
+            <include>**/*.cljc</include>
+            <include>**/*.cljs</include>
+          </includes>
+        </configuration>
+      </plugin>
+    </plugins>
+  </build>
+
+  <distributionManagement>
+    <repository>
+      <id>clojars</id>
+      <name>Clojars repository</name>
+      <url>https://clojars.org/repo</url>
+    </repository>
+  </distributionManagement>
+
+</project>
