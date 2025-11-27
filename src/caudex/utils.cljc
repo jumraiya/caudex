@@ -2,9 +2,11 @@
   (:require
    [caudex.graph :as graph]
    [caudex.dbsp :as dbsp]
-   [clojure.core.protocols :refer [datafy]]
-   ;; #?(:clj [com.phronemophobic.clj-graphviz :refer [render-graph]]
-   ;;    :cljs ["vis-network" :as vis])
+   [clojure.string :as str]
+   [caudex.graph :as g]
+   [datascript.built-ins :as d.fns]
+   [clojure.core.protocols :refer [datafy Datafiable]]
+   #?(:clj [com.phronemophobic.clj-graphviz :refer [render-graph]])
    #?(:clj [clojure.data.json :as json])))
 
 (defonce debug-data (atom nil))
@@ -12,6 +14,9 @@
 (defn is-op? [in]
   (satisfies? dbsp/Operator in))
 
+(defn- is-non-datom-clause? [graph node]
+  (contains? #{:rule :or-join :not-join :fn :pred}
+             (graph/attr graph node :type)))
 
 (defn op->edn [op]
   (when (is-op? op)
@@ -19,14 +24,14 @@
      :type (dbsp/-get-op-type op)
      :inputs (dbsp/-get-input-types op)
      #_(try
-       (dbsp/-get-input-types op)
-       (catch Exception ex
-         "error"))
+         (dbsp/-get-input-types op)
+         (catch Exception ex
+           "error"))
      :output (dbsp/-get-output-type op)
      #_(try
-       (dbsp/-get-output-type op)
-       (catch Exception ex
-         "error"))}))
+         (dbsp/-get-output-type op)
+         (catch Exception ex
+           "error"))}))
 
 
 (defn get-root-node [graph]
@@ -38,30 +43,72 @@
     (graph/nodes graph))
    (some
     #(when (= 0 (graph/in-degree graph %))
-           %)
+       %)
     (graph/nodes graph))))
 
-(defn graph->edn [graph]
-  (let [edn (graph/graph->edn graph)]
-    (-> edn
-        (update :nodes (fn [nodes]
-                         (mapv (fn [[n attrs]]
-                                 [(if (graph/is-graph? n)
-                                    (graph->edn n)
-                                    (or (op->edn n) n))
-                                  attrs])
-                               nodes)))
-        (update :directed-edges (fn [edges]
-                                  (mapv
-                                   (fn [[src dest attrs]]
-                                     [(if (graph/is-graph? src)
-                                        (graph->edn src)
-                                        (or (op->edn src) src))
-                                      (if (graph/is-graph? dest)
-                                        (graph->edn dest)
-                                        (or (op->edn dest) dest))
-                                      attrs])
-                                   edges))))))
+
+(defn circuit->edn [gr]
+  (let [to-edn #(if (graph/is-graph? %)
+                  (circuit->edn %)
+                  (if (satisfies? Datafiable %)
+                    (datafy %)
+                    %))]
+   {:nodes (mapv (fn [n]
+                   [(to-edn n)
+                    (graph/attrs gr n)])
+                 (graph/nodes gr))
+    :directed-edges (mapv
+                     (fn [{:keys [src dest] :as edge}]
+                       (conj (mapv to-edn [src dest])
+                             (graph/attrs gr edge)))
+                     (graph/edges gr))}))
+
+(defn- edn->op [edn]
+  (let [resolve-arg #(if (and (vector? %) (= :idx (first %)))
+                       (dbsp/->ValIndex (second %))
+                       %)
+        resolve-fn #?(:clj #(if-let [f (get d.fns/query-fns %)]
+                              f
+                              (-> % resolve var-get))
+                      :cljs #(if-let [f (get d.fns/query-fns %)]
+                               f
+                               (throw (js/Error. (str "Could not find fn " %)))))
+        resolve-constraint (fn [[pred & args]]
+                             (into
+                              [(resolve-fn pred)]
+                              (mapv resolve-arg args)))]
+    (if (and (map? edn) (:type edn))
+      (case (:type edn)
+        :root (dbsp/->RootOperator (:id edn))
+        :filter (dbsp/->FilterOperator
+                 (:id edn)
+                 (first (:inputs edn))
+                 (mapv resolve-constraint (:filters edn))
+                 (mapv resolve-arg (:projections edn)))
+        :map (dbsp/->MapOperator
+              (:id edn)
+              (-> edn :inputs first)
+              (:output edn)
+              (resolve-fn (:mapping-fn edn))
+              (mapv resolve-arg (:args edn)))
+        :neg (dbsp/->NegOperator (:id edn) (-> edn :inputs first))
+        :delay (dbsp/->DelayOperator (:id edn) (-> edn :inputs first))
+        :integrate (dbsp/->IntegrationOperator (:id edn) (-> edn :inputs first))
+        :join (dbsp/->JoinOperator (:id edn) (-> edn :inputs first) (-> edn :inputs second) (mapv resolve-constraint (:join-conds edn)))
+        :add (dbsp/->AddOperator (:id edn) (-> edn :inputs first)))
+      edn)))
+
+(defn edn->circuit [edn]
+  (let [gr (graph/new-graph)]
+    (reduce
+     (fn [gr [src dest attrs]]
+       (graph/add-directed-edges gr [(edn->op src) (edn->op dest) attrs]))
+     (reduce
+      (fn [gr [node attrs]]
+        (graph/add-nodes-with-attrs gr [(edn->op node) attrs]))
+      gr
+      (:nodes edn))
+     (:directed-edges edn))))
 
 (defn- display-node [g n]
   (if n
@@ -120,29 +167,34 @@
 
 (defn prn-graph
   ([g]
-   (prn-graph g "graph"))
-  ([g container-id]
-   (let [{:keys [nodes edges] :as circuit-map} (circuit->map g)]
-     ;; #?(:clj
-     ;;    (render-graph
-     ;;     (assoc
-     ;;      {:nodes (mapv #(display-node g %) (graph/nodes g))
-     ;;       :edges (into []
-     ;;                    (map #(hash-map :from (display-node g (:src %))
-     ;;                                    :to (display-node g  (:dest %))
-     ;;                                    :label (str (get-in (:attrs g) [(:id %) :label]))))
-     ;;                    (graph/edges g))}
-     ;;      :flags #{:directed} :default-attributes {:edge {:label "label"}} :layout-algorithm :neato)))
-     )))
+   (prn-graph g "graph.png"))
+  ([g filename]
+   (let [;; {:keys [nodes edges] :as circuit-map}
+         ;; (circuit->map g)
+         ]
+     #?(:clj
+        (render-graph
+         (assoc
+          {:nodes (mapv #(display-node g %) (graph/nodes g))
+           :edges (into []
+                        (map #(hash-map :from (display-node g (:src %))
+                                        :to (display-node g  (:dest %))
+                                        :label (str (get-in (:attrs g) [(:id %) :label]))))
+                        (graph/edges g))}
+          :flags #{:directed} :default-attributes {:edge {:label "label"}} :layout-algorithm :neato)
+         {:filename filename})))))
 
+#trace
 (defn topsort
   [circuit & {:keys [start visited visited-check-fn]
               :or {start (get-root-node circuit) visited #{}}}]
   (let [queue (into [start]
-                    (filter #(and
-                              (not= start %)
-                              (= 0 (graph/in-degree circuit %))))
-                    (graph/nodes circuit))]
+                    (if (seq visited)
+                      visited
+                      (filterv #(and
+                                 (not= start %)
+                                 (= 0 (graph/in-degree circuit %)))
+                               (graph/nodes circuit))))]
     (loop [queue queue order [] visited visited]
       (let [[cur & queue] queue
             visited (conj visited cur)
@@ -174,12 +226,12 @@
    - :start-nodes - Collection of nodes to start from (defaults to all root nodes)
    - :visited-check-fn - Function (dep-node current-node) -> boolean to determine
                         if a dependency should be ignored for ordering purposes"
-  [g & {:keys [start-nodes visited-check-fn]
-        :or {start-nodes [(get-root-node g)]}}]
+  [g & {:keys [start-nodes visited-check-fn visited]
+        :or {start-nodes [(get-root-node g)] visited #{}}}]
   (let [start-nodes (if (sequential? start-nodes) start-nodes [start-nodes])]
     (loop [queue (vec start-nodes)
            strata []
-           visited #{}]
+           visited visited]
       (if (empty? queue)
         strata
         (let [;; Add current stratum to result
@@ -257,17 +309,52 @@
             (and (#{:delay :delay-feedback} (-> dep op->edn :type))
                  (some? (graph/find-edge circuit node dep)))))))
 
-(defn topsort-query-graph [query-graph & {:keys [stratify?] :as opts}]
-  ((if stratify? stratified-topsort topsort)
-   query-graph
-   (assoc opts :visited-check-fn
-          (fn [dep node]
-            (if (contains? #{:rule :or-join :not-join}
-                           (graph/attr query-graph node :type))
-              (not (and (graph/attr
-                         query-graph (graph/find-edge query-graph dep node) :required?)
-                        (symbol? dep)))
-              (not (symbol? dep)))))))
+ #_(defn topsort-query-graph [query-graph & {:keys [stratify?] :as opts}]
+     (let [nodes-with-no-unsatisifed-deps
+           (filterv
+            (fn [node]
+              (or (and (not (symbol? node))
+                       (not (is-non-datom-clause? query-graph node)))
+                  (and (symbol? node)
+                       (not (some #(when (true? (graph/attr query-graph % :required?))
+                                     true)
+                                  (graph/out-edges query-graph node))))
+                  (and (is-non-datom-clause? query-graph node)
+                       (every? #(not (true? (graph/attr query-graph % :required?)))
+                               (graph/in-edges query-graph node)))))
+            (graph/nodes query-graph))
+        ;; opts (if (seq nodes-with-no-unsatisifed-deps)
+        ;;        (assoc opts :start (first nodes-with-no-unsatisifed-deps)
+        ;;               :visited (-> nodes-with-no-unsatisifed-deps rest set))
+        ;;        opts)
+           ]
+       ((if stratify? stratified-topsort topsort)
+        query-graph
+        (assoc opts :visited-check-fn
+               (fn [dep node]
+                 (if (contains? #{:rule :or-join :not-join}
+                                (graph/attr query-graph node :type))
+                   (not (and (graph/attr
+                              query-graph (graph/find-edge query-graph dep node) :required?)
+                             (symbol? dep)))
+                   (not (symbol? dep))))))))
+#trace
+(defn topsort-query-graph [query-graph]
+  (let [dep-graph (reduce
+                   (fn [gr {:keys [src dest] :as edge}]
+                     (let [{:keys [label required?]} (g/attrs query-graph edge)]
+                       (if (and (is-non-datom-clause? query-graph dest)
+                                (= :arg (first label))
+                                (not (true? required?)))
+                         (g/add-directed-edges gr [dest src])
+                         (g/add-directed-edges gr [src dest]))))
+                   (g/new-graph)
+                   (g/edges query-graph))
+        nodes (topsort dep-graph)]
+    (when (not (seq nodes))
+      #?(:clj (throw (Exception. "Empty query graph"))
+         :cljs (throw (js/Error. "Empty query graph"))))
+    nodes))
 
 (defn datafy-circuit [circuit]
   (mapv #(mapv datafy %)
@@ -325,3 +412,18 @@
                         (recur parents new-edges (inc t))
                         parents)))]
       parents))
+
+(comment
+  (doseq [view ["player-location"
+                "move-action"
+                "inspect-action"
+                "pickup-action"
+                "bowl-on-table"
+                "open-safe"
+                "set-safe-combination"
+                "accessible-objects"
+                "accessible-exits"
+                "put-action"
+                "open-action"]]
+    (let [edn (slurp (str "/Users/jumraiya/projects/escape-room/public/views/" view ".edn"))]
+      (edn->circuit edn))))

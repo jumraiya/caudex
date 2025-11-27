@@ -9,6 +9,9 @@
 
 (declare add-op-inputs)
 
+(def eq (vary-meta = #(assoc % :fn-sym '=)))
+
+(def ident (vary-meta identity #(assoc % :fn-sym 'identity)))
 
 (defn- last-index-of [coll item]
   (->> coll
@@ -261,9 +264,9 @@
                (let [attr (graph/attr query-graph edge :label)
                      conds
                      (cond-> []
-                       (not (symbol? src)) (conj [= (dbsp/->ValIndex 0) src])
-                       (not (symbol? attr)) (conj [= (dbsp/->ValIndex 1) attr])
-                       (not (symbol? dest)) (conj [= (dbsp/->ValIndex 2) dest]))
+                       (not (symbol? src)) (conj [eq (dbsp/->ValIndex 0) src])
+                       (not (symbol? attr)) (conj [eq (dbsp/->ValIndex 1) attr])
+                       (not (symbol? dest)) (conj [eq (dbsp/->ValIndex 2) dest]))
                      selections
                      (cond-> []
                        (var? src) (conj (dbsp/->ValIndex 0))
@@ -314,122 +317,128 @@
 
 
  (defn- process-fn|pred [circuit type args frontier query-graph node input-op-map]
-   (let [only-const-args? (every? #(not (symbol? %)) (mapv first args))
-         ops (into []
-                   (comp
-                    (map first)
-                    (filter symbol?)
-                    (map #(or
-                           (some (fn [op]
-                                   (when (contains? (set (dbsp/-get-output-type op)) %)
-                                     op))
-                                 frontier)
-                           (get input-op-map %)))
-                    (filter some?))
-                   args)
-         [circuit last-op frontier]
-         (reduce
-          (fn [[c op frontier] op-2]
-            (let [[c last-op] (join-ops c op op-2)]
-              [c last-op (-> frontier (disj op op-2) (conj last-op))]))
-          [circuit (first ops) frontier]
-          (rest ops))
-         last-op (if only-const-args?
-                   (get-root circuit)
-                   last-op)
-         binding (some #(when (= :binding (graph/attr query-graph % :label)) %)
-                       (graph/out-edges query-graph node))
-         [input-type output-type] (if only-const-args?
-                                    [(mapv first args)
-                                     [(:dest binding)]]
-                                    [(dbsp/-get-output-type last-op)
-                                     (conj (-> last-op
-                                               (dbsp/-get-output-type) (dbsp/-to-vector))
-                                           (:dest binding))])
-         indices
-         (mapv
-          (fn [[arg _ required?]]
-            (let [idx (if (symbol? arg)
-                        (find-val-idx last-op arg)
-                        arg)]
-              (if (and (nil? idx) (symbol? arg) required?)
-                #?(:cljs (throw js/Error (str "Could not find " arg " in input op"))
-                   :clj (throw (Exception. (str "Could not find " arg " in input op"))))
-                idx)))
-          args)
-         [circuit frontier]
-         (case type
-           :pred (let [op (dbsp/->FilterOperator
-                           (gensym "pred-")
-                           input-type
-                           [(into [(graph/attr query-graph node :fn)]
-                                  indices)]
-                           nil)]
-                   [(add-op-inputs circuit op last-op)
-                    (conj (set frontier) op)])
-           :fn (let [op (dbsp/->MapOperator (gensym "fn-")
-                                            input-type
-                                            output-type
+  (let [only-const-args? (every? #(not (symbol? %)) (mapv first args))
+        ops (into []
+                  (comp
+                   (map first)
+                   (filter symbol?)
+                   (map #(or
+                          (some (fn [op]
+                                  (when (contains? (set (dbsp/-get-output-type op)) %)
+                                    op))
+                                frontier)
+                          (get input-op-map %)))
+                   (filter some?))
+                  args)
+        [circuit last-op frontier]
+        (reduce
+         (fn [[c op frontier] op-2]
+           (let [[c last-op] (join-ops c op op-2)]
+             [c last-op (-> frontier (disj op op-2) (conj last-op))]))
+         [circuit (first ops) frontier]
+         (rest ops))
+        last-op (if only-const-args?
+                  (get-root circuit)
+                  last-op)
+        binding (some #(when (= :binding (graph/attr query-graph % :label)) %)
+                      (graph/out-edges query-graph node))
+        [input-type output-type] (if only-const-args?
+                                   [(mapv first args)
+                                    [(:dest binding)]]
+                                   [(dbsp/-get-output-type last-op)
+                                    (conj (-> last-op
+                                              (dbsp/-get-output-type) (dbsp/-to-vector))
+                                          (:dest binding))])
+        indices
+        (mapv
+         (fn [[arg _ required?]]
+           (let [idx (if (symbol? arg)
+                       (find-val-idx last-op arg)
+                       arg)]
+             (if (and (nil? idx) (symbol? arg) required?)
+               #?(:cljs (throw (js/Error (str "Could not find " arg " in input op")))
+                  :clj (throw (Exception. (str "Could not find " arg " in input op"))))
+               idx)))
+         args)
+        [circuit frontier]
+        (case type
+          :pred (let [op (dbsp/->FilterOperator
+                          (gensym "pred-")
+                          input-type
+                          [(into [(vary-meta
+                                   (graph/attr query-graph node :fn)
+                                   #(assoc % :fn-sym
+                                           (graph/attr query-graph node :fn-sym)))]
+                                 indices)]
+                          nil)]
+                  [(add-op-inputs circuit op last-op)
+                   (conj (set frontier) op)])
+          :fn (let [op (dbsp/->MapOperator (gensym "fn-")
+                                           input-type
+                                           output-type
+                                           (vary-meta
                                             (graph/attr query-graph node :fn)
-                                            indices)
-                     circuit (add-op-inputs circuit op last-op)]
-                 #_(reduce
-                    (fn [[circuit frontier] fr-op]
-                      (let [[c new-op] (join-ops circuit fr-op op)]
-                        [c
-                         (-> frontier
-                             (disj fr-op)
-                             (conj new-op))]))
-                    [circuit frontier]
-                    frontier)
-                 [circuit (conj (set frontier) op)]))]
-     (consolidate-frontier circuit frontier)))
+                                            #(assoc % :fn-sym
+                                                    (graph/attr query-graph node :fn-sym)))
+                                           indices)
+                    circuit (add-op-inputs circuit op last-op)]
+                #_(reduce
+                   (fn [[circuit frontier] fr-op]
+                     (let [[c new-op] (join-ops circuit fr-op op)]
+                       [c
+                        (-> frontier
+                            (disj fr-op)
+                            (conj new-op))]))
+                   [circuit frontier]
+                   frontier)
+                [circuit (conj (set frontier) op)]))]
+    (consolidate-frontier circuit frontier)))
 
 (defn- add-const-input-op [circuit value & [var]]
   (let [f-op (dbsp/->MapOperator (gensym "const-")
                                  [value]
                                  [(or var value)]
-                                 identity
+                                 ident
                                  [value])]
     [(add-op-inputs circuit f-op (get-root circuit)) f-op]))
 
 
  (defn- mk-input-ops
-   ([circuit sources inputs input-op-map]
-    (reduce
-     (fn [[c m] [in _ required?]]
-       (let [[c source idx const-op?]
-             (if (not (symbol? in))
-               (into (add-const-input-op c in)
-                     [(dbsp/->ValIndex 0) true])
-               (into [c]
-                     (some
-                      #(when-let [idx (find-val-idx % in)]
-                         [% idx false])
-                      sources)))
-             _ (when (and (nil? idx) (not (contains? input-op-map in)) required?)
-                 #?(:cljs (throw js/Error (str "Could not find input " in))
-                    :clj (throw (Exception. (str "Could not find input " in)))))]
-         (cond
-           (some? idx) (let [op (cond-> (dbsp/->FilterOperator
-                                         (gensym "input-")
-                                         (-> source dbsp/-get-output-type dbsp/-to-vector)
-                                         nil
-                                         [idx])
-                                  const-op? (with-meta {:static-op true}))
-                             m (assoc m in op)]
-                         [(add-op-inputs c op source)
-                          (if (some? source)
-                            (assoc-in m [:sources in] source)
-                            m)])
-           (contains? input-op-map in)
-           [c
-            (-> m
-                (assoc in (get input-op-map in))
-                (assoc-in [:sources in] (get-in input-op-map [:sources in])))]
-           :else [c m])))
-     [circuit {}]
-     inputs)))
+  ([circuit sources inputs input-op-map]
+   (reduce
+    (fn [[c m] [in _ required?]]
+      (let [[c source idx const-op?]
+            (if (not (symbol? in))
+              (into (add-const-input-op c in)
+                    [(dbsp/->ValIndex 0) true])
+              (into [c]
+                    (some
+                     #(when-let [idx (find-val-idx % in)]
+                        [% idx false])
+                     sources)))
+            _ (when (and (nil? idx) (not (contains? input-op-map in)) required?)
+                #?(:cljs (throw (js/Error (str "Could not find input " in)))
+                   :clj (throw (Exception. (str "Could not find input " in)))))]
+        (cond
+          (some? idx) (let [op (cond-> (dbsp/->FilterOperator
+                                        (gensym "input-")
+                                        (-> source dbsp/-get-output-type dbsp/-to-vector)
+                                        nil
+                                        [idx])
+                                 const-op? (with-meta {:static-op true}))
+                            m (assoc m in op)]
+                        [(add-op-inputs c op source)
+                         (if (some? source)
+                           (assoc-in m [:sources in] source)
+                           m)])
+          (contains? input-op-map in)
+          [c
+           (-> m
+               (assoc in (get input-op-map in))
+               (assoc-in [:sources in] (get-in input-op-map [:sources in])))]
+          :else [c m])))
+    [circuit {}]
+    inputs)))
 
 
  (defn- handle-not-join [circuit frontier args rules input-op-map not-join-body]
@@ -482,7 +491,6 @@
          combined-frontier (set/union frontier sub-circuit-frontier)]
      (consolidate-frontier circuit combined-frontier)))
 
-
  (defn- merge-or-branches [circuit branches args rules input-ops]
    (reduce
     (fn [[base-circuit frontiers] branch-graph]
@@ -511,7 +519,6 @@
         [merged-circuit (conj frontiers sub-circuit-frontier)]))
     [circuit []]
     branches))
-
 
  (defn- handle-or-join* [circuit frontier args rules input-ops branches]
    (let [[circuit or-frontiers] (merge-or-branches circuit branches (mapv first args) rules input-ops)
@@ -584,7 +591,6 @@
      (handle-or-join* circuit frontier args rules input-ops branches)))
 
 
-
  (defn- process-non-pattern-clauses
   "Processes non datom clauses, all required inputs are joined into a single operator"
   [circuit frontier query-graph rules input-op-map]
@@ -642,8 +648,8 @@
                      (dbsp/->FilterOperator
                       (gensym "input-")
                       [::input % %]
-                      [[= ::input (dbsp/->ValIndex 0)]
-                       [= % (dbsp/->ValIndex 1)]]
+                      [[eq ::input (dbsp/->ValIndex 0)]
+                       [eq % (dbsp/->ValIndex 1)]]
                       [(dbsp/->ValIndex 2)])))
                   inputs)
             true])
@@ -681,6 +687,42 @@
 
 (comment
 
+  (build-circuit
+   '[:find ?a ?dest ?locked
+     :in $ %
+     :where
+     [?p :object/description "player"]
+     [?p :object/location ?loc]
+     (new-action-added? ?a :move ?arg :action/move-processed?)
+     [(keyword ?arg) ?wall]
+     (or-join [?loc ?wall ?dest ?locked]
+              (and
+               [?exit :exit/location-1 ?loc]
+               [?exit :exit/location-1-wall ?wall]
+               [?exit :exit/location-2 ?dest]
+               [?exit :exit/locked? ?locked])
+              (and
+               [?exit :exit/location-2 ?loc]
+               [?exit :exit/location-2-wall ?wall]
+               [?exit :exit/location-1 ?dest]
+               [?exit :exit/locked? ?locked])
+              (and
+               (not-join [?loc ?wall]
+                         (or-join [?loc ?wall]
+                                  (and
+                                   [?e :exit/location-2 ?loc]
+                                   [?e :exit/location-2-wall ?wall])
+                                  (and
+                                   [?e :exit/location-1 ?loc]
+                                   [?e :exit/location-1-wall ?wall])))
+               [(ground :not-found) ?dest]
+               [(ground false) ?locked]))]
+   '[[(new-action-added? [?action ?action-type ?action-arg ?handler-attr])
+      [?action :action/type ?action-type]
+      [?action :action/arg ?action-arg]
+      (not-join [?action ?handler-attr]
+                [?action ?handler-attr true])]])
+
   (build-circuit '[:find ?name
                    :in $ % ?cat-name
                    :where
@@ -699,3 +741,4 @@
      :where
      [?a :attr ?in]
      [?b :attr ?in2]]))
+

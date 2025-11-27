@@ -2,6 +2,7 @@
   (:require [clojure.test :refer [deftest is]]
             [caudex.circuit :as c]
             [caudex.impl.circuit :as impl]
+            [caudex.utils :as utils]
             [matcher-combinators.test]
             [matcher-combinators.matchers :as m]))
 
@@ -29,7 +30,6 @@
          {[1 2] false
           [3 4] true}
          output-2))))
-
 
 
 (deftest test-preds
@@ -461,7 +461,28 @@
     (is (= {[1 2] true} output))
     (is (= {[1 2] true} output-2))))
 
-;(clojure.test/run-test test-rules-free-vars)
+
+(deftest test-rule-dependency
+  (let [rules '[[(rule-1 ?a ?b)
+                 [?a :ref ?b]
+                 [?a :attr 10]]
+                [(rule-2 ?a)
+                 (not-join [?a]
+                           [?a :attr-2 12])]]
+        q '[:find ?a
+            :in $ %
+            :where
+            (rule-2 ?a)
+            (rule-1 ?a :b)]
+        tx-data [[:a :ref :b 123 true]
+                 [:a :attr 10 123 true]]
+        ccircuit (c/build-circuit q rules)
+        circuit (impl/reify-circuit ccircuit)
+        circuit (impl/step circuit tx-data)
+        output (last (impl/get-output-stream circuit))]
+    (is (= {[:a] true} output))))
+
+                                        ;(clojure.test/run-test test-rules-free-vars)
                                         ;(clojure.test/run-test test-nested-rules)
 (deftest test-nested-rules
   (let [q '[:find ?a ?b

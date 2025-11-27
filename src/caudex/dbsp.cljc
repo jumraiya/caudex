@@ -22,6 +22,8 @@
    :inputs (-get-input-types op)
    :output (-get-output-type op)})
 
+(def eq (vary-meta = #(assoc % :fn-sym '=)))
+
 ;; Defines a zset "type", a concatenation of vars contained in zsets joined to create this one
 (defprotocol ZSetType
   (-to-vector [this])
@@ -77,7 +79,7 @@
      (fn [constraints [var indices]]
        (into constraints
              (for [idx-1 indices idx-2 (get indices-2 var)]
-               [= (->ValIndex idx-1)
+               [eq (->ValIndex idx-1)
                 (->ValIndex idx-2)])))
      []
      indices-1)))
@@ -201,18 +203,32 @@
   (-get-input-types [_] [input-type input-type])
   (-get-output-type [_] input-type))
 
+(defn- fn->sym [func]
+  (-> func meta :fn-sym))
+
+(defn- filters->edn [filters]
+  (mapv
+   #(mapv
+     (fn [v]
+       (if (fn? v)
+         (fn->sym v)
+         (datafy v)))
+     %)
+   filters))
+
+
 (extend-protocol Datafiable
   RootOperator
   (datafy [this] (datafy-op this))
   FilterOperator
   (datafy [this]
     (assoc (datafy-op this)
-           :filters (mapv #(mapv (fn [v] (datafy v)) %) (:filters this))
+           :filters (filters->edn (:filters this))
            :projections (mapv datafy (:projections this))))
   MapOperator
   (datafy [this]
     (assoc (datafy-op this)
-           :mapping-fn (:mapping-fn this)
+           :mapping-fn (fn->sym (:mapping-fn this))
            :args (mapv datafy (:args this))))
   NegOperator
   (datafy [this] (datafy-op this))
@@ -223,31 +239,11 @@
   IntegrationOperator
   (datafy [this] (datafy-op this))
   JoinOperator
-  (datafy [this] (datafy-op this))
+  (datafy [this]
+    (assoc (datafy-op this)
+           :join-conds (filters->edn (:join-conds this))))
   AddOperator
   (datafy [this] (datafy-op this))
   ValIndex
   (datafy [this] [:idx (:idx this)]))
 
-(comment
-  (let [arr [4 6 7 1 3]
-        next-idx (fn [pred idx arr]
-                   (loop [i idx]
-                     (if (and (< i (count arr))
-                              (pred (nth arr i)))
-                       i
-                       (when (< i (count arr))
-                         (recur (inc i))))))
-        next-odd (partial next-idx odd?)
-        next-even (partial next-idx even?)]
-    (loop [o-idx 0 e-idx 0 odd-used #{} even-used #{}]
-      (when (and o-idx e-idx (not= o-idx e-idx))
-        (prn (nth arr o-idx) (nth arr e-idx)))
-      (when (and (< o-idx (count arr)) (< e-idx (count arr)))
-        (let [odd-used (conj odd-used o-idx)
-              even-used (conj even-used e-idx)]
-          (cond
-            (= o-idx e-idx) (recur (next-odd o-idx) e-idx odd-used even-used)
-            (> o-idx e-idx) (cond
-                              (> (- o-idx e-idx) 1)
-                              (recur (next-odd o-idx) e-idx odd-used even-used))))))))

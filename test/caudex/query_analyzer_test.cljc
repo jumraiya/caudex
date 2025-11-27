@@ -53,7 +53,7 @@
                                                  [?b :attr2 :test])
                                        [?b :attr3 :test2]))])
 
-          edn (utils/graph->edn graph)]
+          edn (utils/circuit->edn graph)]
       (is (match?
            {:directed-edges
             (m/in-any-order

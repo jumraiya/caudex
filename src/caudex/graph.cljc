@@ -87,6 +87,10 @@
                (add-attrs g {:src src :dest dest} attrs)
                g))))
 
+(defn topsort [graph]
+  #?(:clj (alg/topsort graph)
+     :cljs (l.alg/topsort graph)))
+
 ;; For some reason loaded loom function does not work correctly
 (defn- remove-nodes-cljs [graph nodes]
   #?(:cljs
@@ -108,12 +112,12 @@
        (remove-nodes graph nodes))))
 
 (defn remove-nodes [graph & nodes]
-  ;(prn "removing" nodes "from" graph)
+                                        ;(prn "removing" nodes "from" graph)
   #?(:clj (apply uber/remove-nodes (into [graph] nodes))
      :cljs (let [g (if (seq nodes)
                      (remove-nodes-cljs graph nodes)
                      graph)]
-             ;(prn g)
+                                        ;(prn g)
              g)))
 
 (defn add-nodes [graph & nodes]
