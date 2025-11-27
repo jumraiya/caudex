@@ -160,7 +160,7 @@
             [[{:src '?a} nil] [{:src '?b} true]])
            edges-2))
       (is (match? [[{:src '?c} true]] edges-3)))))
-#trace
+
 (deftest test-remap-nodes
   (let [query '[:find ?a ?b
                 :in $ %

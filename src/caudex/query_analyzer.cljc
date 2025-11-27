@@ -20,7 +20,7 @@
     (:value v)
     datascript.parser.Placeholder
     '_))
-#trace
+
 (defn- conjunction-produces-var? [cnjn var]
   (if (or (some #(when (= :binding (graph/attr cnjn % :label)) %)
                 (graph/in-edges cnjn var))
@@ -39,7 +39,7 @@
      false
      (graph/out-edges cnjn var))))
 
- #_(defn- is-var-required? [graph node var]
+ (defn- is-var-required? [graph node var]
    (case (graph/attr graph node :type)
      :or-join (or (some
                    (fn [edge]
@@ -51,46 +51,7 @@
                   false)
      :not-join true))
 
-(defn- is-var-required? [graph var]
-    (if (or (some #(when (= :binding (graph/attr graph % :label)) %)
-                  (graph/in-edges graph var))
-            (some #(when (= :pattern (graph/attr graph % :clause-type)) %)
-                  (into (graph/out-edges graph var)
-                        (graph/in-edges graph var))))
-      false
-      (reduce
-       (fn [res {:keys [dest] :as edge}]
-         (case (graph/attr graph dest :type)
-           :or-join (or (some
-                         (fn [edge]
-                           (prn "node" (:dest edge)
-                                "is-var-required?" is-var-required?)
-                           (when (true? (is-var-required? (:dest edge) var))
-                             true))
-                         (eduction
-                          (filter (fn [e] (= :conj (graph/attr graph e :label))))
-                          (graph/out-edges graph dest)))
-                        false)
-           :not-join true
-                                        ;:not-join (is-var-required? dest var)
-           :rule (if (true? (graph/attr graph edge :required?)) true false)
-           res))
-       true
-       (graph/out-edges graph var))))
-
 (defn- mark-required-vars [graph node vars]
-  (reduce
-   (fn [g var]
-     (let [edge (graph/find-edge g var node)]
-       (if edge
-        (graph/add-attr g edge :required? true)
-        g)))
-   graph
-   (eduction
-    (filter #(is-var-required? graph %))
-    vars)))
-
-#_(defn- mark-required-vars [graph node vars]
   (reduce
    (fn [g var]
      (let [edge (graph/find-edge g var node)]
@@ -205,7 +166,8 @@
                                                (comp
                                                 (map-indexed vector)
                                                 (filter (fn [[_idx var]]
-                                                          (is-var-required? graph var)))
+                                                          (not (conjunction-produces-var? graph var))
+                                                          #_(is-var-required? graph var)))
                                                 (map first))
                                                inputs)
                            recursive-nodes (filterv #(and (= :rule (graph/attr graph % :type))
@@ -315,8 +277,12 @@
         [?a :attr ?b]
         [(keyword ?b) ?c]
         (or-join [?a ?c]
-                 [?a :attr-2 10]
-                 [?c :attr-3 123]
+                 (and
+                  [?a :attr-2 10]
+                  [?c :attr-3 132])
+                 (and
+                  [?a :attr-2 22]
+                  [?c :attr-3 123])
                  #_(not-join [?a ?c]
                              [?a :attr-4 :asd]
                              (or-join [?c]

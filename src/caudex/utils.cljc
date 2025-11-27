@@ -179,12 +179,13 @@
            :edges (into []
                         (map #(hash-map :from (display-node g (:src %))
                                         :to (display-node g  (:dest %))
-                                        :label (str (get-in (:attrs g) [(:id %) :label]))))
+                                        :label (pr-str (get (:attrs g) (:id %))
+                                                #_(get-in (:attrs g) [(:id %) :label]))))
                         (graph/edges g))}
           :flags #{:directed} :default-attributes {:edge {:label "label"}} :layout-algorithm :neato)
          {:filename filename})))))
 
-#trace
+
 (defn topsort
   [circuit & {:keys [start visited visited-check-fn]
               :or {start (get-root-node circuit) visited #{}}}]
@@ -338,7 +339,7 @@
                               query-graph (graph/find-edge query-graph dep node) :required?)
                              (symbol? dep)))
                    (not (symbol? dep))))))))
-#trace
+
 (defn topsort-query-graph [query-graph]
   (let [dep-graph (reduce
                    (fn [gr {:keys [src dest] :as edge}]
