@@ -687,42 +687,6 @@
 
 (comment
 
-  (build-circuit
-   '[:find ?a ?dest ?locked
-     :in $ %
-     :where
-     [?p :object/description "player"]
-     [?p :object/location ?loc]
-     (new-action-added? ?a :move ?arg :action/move-processed?)
-     [(keyword ?arg) ?wall]
-     (or-join [?loc ?wall ?dest ?locked]
-              (and
-               [?exit :exit/location-1 ?loc]
-               [?exit :exit/location-1-wall ?wall]
-               [?exit :exit/location-2 ?dest]
-               [?exit :exit/locked? ?locked])
-              (and
-               [?exit :exit/location-2 ?loc]
-               [?exit :exit/location-2-wall ?wall]
-               [?exit :exit/location-1 ?dest]
-               [?exit :exit/locked? ?locked])
-              (and
-               (not-join [?loc ?wall]
-                         (or-join [?loc ?wall]
-                                  (and
-                                   [?e :exit/location-2 ?loc]
-                                   [?e :exit/location-2-wall ?wall])
-                                  (and
-                                   [?e :exit/location-1 ?loc]
-                                   [?e :exit/location-1-wall ?wall])))
-               [(ground :not-found) ?dest]
-               [(ground false) ?locked]))]
-   '[[(new-action-added? [?action ?action-type ?action-arg ?handler-attr])
-      [?action :action/type ?action-type]
-      [?action :action/arg ?action-arg]
-      (not-join [?action ?handler-attr]
-                [?action ?handler-attr true])]])
-
   (build-circuit '[:find ?name
                    :in $ % ?cat-name
                    :where

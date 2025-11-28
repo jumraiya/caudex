@@ -34,7 +34,10 @@
         res
         (case (graph/attr cnjn dest :type)
           :not-join false
-          (:rule :fn :pred) (if (true? (graph/attr cnjn edge :required?)) false true)
+          (:rule :fn :pred :or-join)
+          (if (true? (graph/attr cnjn edge :required?))
+            false
+            true)
           res)))
      false
      (graph/out-edges cnjn var))))
