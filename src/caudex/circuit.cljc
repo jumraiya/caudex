@@ -113,10 +113,10 @@
 
 
  (defn- join-ops* [circuit op-1 op-2]
-   (let [int-1 (dbsp/->IntegrationOperator (gensym "integrate-") (dbsp/-get-output-type op-1))
-         int-2 (dbsp/->IntegrationOperator (gensym "integrate-") (dbsp/-get-output-type op-2))
-         constraints (dbsp/-get-join-constraints
+   (let [constraints (dbsp/-get-join-constraints
                       (dbsp/-get-output-type op-1) (dbsp/-get-output-type op-2))
+         int-1 (dbsp/->IntegrationOperator (gensym "integrate-") (dbsp/-get-output-type op-1))
+         int-2 (dbsp/->IntegrationOperator (gensym "integrate-") (dbsp/-get-output-type op-2))
          join-1 (dbsp/->JoinOperator
                  (gensym "join-")
                  (dbsp/-get-output-type op-1)
@@ -315,8 +315,7 @@
                         (graph/terminal-nodes circuit))]
     [circuit (set (filterv #(not= :root (dbsp/-get-op-type %)) terminal-nodes))]))
 
-
- (defn- process-fn|pred [circuit type args frontier query-graph node input-op-map]
+(defn- process-fn|pred [circuit type args frontier query-graph node input-op-map]
   (let [only-const-args? (every? #(not (symbol? %)) (mapv first args))
         ops (into []
                   (comp

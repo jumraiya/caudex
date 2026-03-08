@@ -53,18 +53,34 @@
    zset-2))
 
 (defn- exec-filter-op [zsets op]
-  (into {}
-        (comp
-         (filter (fn [[row]]
-                   (every?
-                    #(dbsp/-satisfies? % row)
-                    (:filters op))))
-         (map (fn [[k v]]
-                (if (seq (:projections op))
-                  [(mapv #(nth k (:idx %)) (:projections op))
-                   v]
-                  [k v]))))
-        (first zsets)))
+  (transduce
+   (comp
+    (filter (fn [[row]]
+              (every?
+               #(dbsp/-satisfies? % row)
+               (:filters op))))
+    (map (fn [[k v]]
+           (if (seq (:projections op))
+             [(mapv #(nth k (:idx %)) (:projections op))
+              v]
+             [k v]))))
+   (completing
+    (fn [res row]
+      (add-zsets res (conj {} row))))
+   {}
+   (first zsets))
+  #_(into {}
+          (comp
+           (filter (fn [[row]]
+                     (every?
+                      #(dbsp/-satisfies? % row)
+                      (:filters op))))
+           (map (fn [[k v]]
+                  (if (seq (:projections op))
+                    [(mapv #(nth k (:idx %)) (:projections op))
+                     v]
+                    [k v]))))
+          (first zsets)))
 
 (defn- step-op [op streams print?]
   (let [zsets (mapv last streams)

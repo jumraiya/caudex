@@ -3,14 +3,14 @@
  ;; Production dependencies
  :deps {org.clojure/clojure {:mvn/version "1.12.0"}
         datascript/datascript {:mvn/version "1.7.4"}
-        ubergraph/ubergraph {:mvn/version "0.9.0"}}
+        ubergraph/ubergraph {:mvn/version "0.9.0"}
+        com.phronemophobic/clj-graphviz {:mvn/version "0.6.4"}
+        com.phronemophobic.cljonda/graphviz-darwin-aarch64 {:mvn/version "2.50.0-0.9.5"}}
  
  :aliases 
  {;; Development dependencies
   :dev {:extra-deps {com.github.flow-storm/flow-storm-dbg {:mvn/version "4.4.3"}
                      thheller/shadow-cljs {:mvn/version "2.28.23"}
-                     com.phronemophobic/clj-graphviz {:mvn/version "0.6.4"}
-                     com.phronemophobic.cljonda/graphviz-darwin-aarch64 {:mvn/version "2.50.0-0.9.5"}
                      org.clojure/clojurescript {:mvn/version "1.11.54"}}}
   
   ;; Test dependencies
@@ -18,7 +18,7 @@
          :extra-paths ["test"]}
   
   ;; Build tools
-  :build {:deps {io.github.clojure/tools.build {:mvn/version "0.9.4"}
+  :build {:deps {io.github.clojure/tools.build {:mvn/version "0.10.11"}
                  slipset/deps-deploy {:mvn/version "0.2.0"}}
           :ns-default build}
   

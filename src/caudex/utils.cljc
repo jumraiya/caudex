@@ -6,7 +6,7 @@
    [caudex.graph :as g]
    [datascript.built-ins :as d.fns]
    [clojure.core.protocols :refer [datafy Datafiable]]
-   #?(:clj [com.phronemophobic.clj-graphviz :refer [render-graph]])
+   ;; #?(:clj [com.phronemophobic.clj-graphviz :refer [render-graph]])
    #?(:clj [clojure.data.json :as json])))
 
 (defonce debug-data (atom nil))
@@ -68,10 +68,10 @@
                        (dbsp/->ValIndex (second %))
                        %)
         resolve-fn #?(:clj #(if-let [f (get d.fns/query-fns %)]
-                              f
+                              (with-meta f {:fn-sym %})
                               (-> % resolve var-get))
                       :cljs #(if-let [f (get d.fns/query-fns %)]
-                               f
+                               (with-meta f {:fn-sym %})
                                (throw (js/Error. (str "Could not find fn " %)))))
         resolve-constraint (fn [[pred & args]]
                              (into
@@ -151,7 +151,7 @@
                                            #(mapv (fn [c] (tx-data->zset c)) %))
                           :op-stream-map (:op-stream-map circuit)))]
     (reset! debug-data data)
-    #?(:clj (spit "circuit_data.json" (json/write-str data))
+    #?(:clj (spit "circuit_data_2.json" (json/write-str data))
        :cljs
        (let [json-str (js/JSON.stringify (clj->js data) nil 2)
              blob (js/Blob. #js [json-str] #js {:type "application/json"})
@@ -165,7 +165,7 @@
 
 
 
-(defn prn-graph
+#_(defn prn-graph
   ([g]
    (prn-graph g "graph.png"))
   ([g filename]
@@ -179,12 +179,16 @@
            :edges (into []
                         (map #(hash-map :from (display-node g (:src %))
                                         :to (display-node g  (:dest %))
-                                        :label (pr-str (get (:attrs g) (:id %))
+                                        :label (pr-str (graph/attrs g %)
                                                 #_(get-in (:attrs g) [(:id %) :label]))))
                         (graph/edges g))}
           :flags #{:directed} :default-attributes {:edge {:label "label"}} :layout-algorithm :neato)
          {:filename filename})))))
 
+(defn- contains-op? [coll op]
+  (if (and (record? op) (contains? op :id))
+    (contains? (into #{} (map :id) coll) (:id op))
+    (contains? (set coll) op)))
 
 (defn topsort
   [circuit & {:keys [start visited visited-check-fn]
@@ -201,11 +205,11 @@
             visited (conj visited cur)
             queue (into (vec queue)
                         (comp (map :dest)
-                              (remove #(contains? visited %))
-                              (remove #(contains? (set queue) %))
+                              (remove #(contains-op? visited %))
+                              (remove #(contains-op? queue %))
                               (filter #(every?
                                         (fn [in]
-                                          (or (contains? visited (:src in))
+                                          (or (contains-op? visited (:src in))
                                               (and (fn? visited-check-fn)
                                                    (visited-check-fn (:src in) %))))
                                         (graph/in-edges circuit %))))
@@ -245,7 +249,7 @@
                                (comp
                                 (mapcat #(graph/out-edges g %))
                                 (map :dest)
-                                (remove #(contains? visited %))
+                                (remove #(contains-op? visited %))
                                 (distinct))
                                conj
                                []
@@ -257,7 +261,7 @@
                                (let [dep-node (:src in-edge)]
                                  (or
                                   ;; Dependency is already processed
-                                  (contains? visited dep-node)
+                                  (contains-op? visited dep-node)
                                   ;; Custom check allows ignoring this dependency
                                   (and visited-check-fn
                                        (visited-check-fn dep-node node)))))
