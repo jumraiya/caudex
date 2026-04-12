@@ -74,8 +74,8 @@
   ([circuit op vars]
    (project-vars-from-op circuit op vars {}))
   ([circuit op vars rename-map]
-   (project-vars* circuit op vars rename-map)
-   #_(if (= vars (-> op (dbsp/-get-output-type) (dbsp/-to-vector)))
+   ;(project-vars* circuit op vars rename-map)
+   (if (= vars (-> op (dbsp/-get-output-type) (dbsp/-to-vector)))
      [circuit op]
      (project-vars* circuit op vars rename-map))))
 
@@ -113,32 +113,48 @@
 
 
  (defn- join-ops* [circuit op-1 op-2]
-   (let [constraints (dbsp/-get-join-constraints
-                      (dbsp/-get-output-type op-1) (dbsp/-get-output-type op-2))
-         int-1 (dbsp/->IntegrationOperator (gensym "integrate-") (dbsp/-get-output-type op-1))
-         int-2 (dbsp/->IntegrationOperator (gensym "integrate-") (dbsp/-get-output-type op-2))
-         join-1 (dbsp/->JoinOperator
-                 (gensym "join-")
-                 (dbsp/-get-output-type op-1)
-                 (dbsp/-get-output-type op-2)
-                 constraints)
-         join-2 (dbsp/->JoinOperator
-                 (gensym "join-")
-                 (dbsp/-get-output-type op-1)
-                 (dbsp/-get-output-type op-2)
-                 constraints)
-         delay-3 (dbsp/->DelayOperator (gensym "delay-") (dbsp/-get-output-type op-2))
-         final-add (dbsp/->AddOperator (gensym "add-") (dbsp/-get-output-type join-1))
-         circuit (-> circuit
-                     (add-op-inputs int-1 op-1)
-                     (add-op-inputs join-1 int-1 op-2)
-                     (add-op-inputs int-2 op-2)
-                     (add-op-inputs delay-3 int-2)
-                     (add-op-inputs join-2 op-1 delay-3)
-                     (add-op-inputs final-add join-1 join-2))]
-     (project-vars-from-op
-      circuit final-add
-      (set (-> final-add dbsp/-get-output-type dbsp/-to-vector)))))
+  (let [constraints (dbsp/-get-join-constraints
+                     (dbsp/-get-output-type op-1) (dbsp/-get-output-type op-2))
+        join-input-1-vars (let [common (mapv #(nth (dbsp/-get-output-type op-1)
+                                                   (-> % second :idx))
+                                             constraints)]
+                            (into common (filterv #(not (contains? (set common) %))
+                                                  (dbsp/-get-output-type op-1))))
+        join-input-2-vars (let [common (mapv #(nth (dbsp/-get-output-type op-2)
+                                                   (-> % (nth 2) :idx))
+                                             constraints)]
+                            (into common (filterv #(not (contains? (set common) %))
+                                                  (dbsp/-get-output-type op-2))))
+        [circuit join-input-1] (project-vars-from-op
+                                circuit op-1 join-input-1-vars)
+        [circuit join-input-2] (project-vars-from-op
+                                circuit op-2 join-input-2-vars)
+        int-1 (dbsp/->IntegrationOperator (gensym "integrate-") (dbsp/-get-output-type join-input-1))
+        int-2 (dbsp/->IntegrationOperator (gensym "integrate-") (dbsp/-get-output-type join-input-2))
+        constraints (dbsp/-get-join-constraints
+                     (dbsp/-get-output-type join-input-1) (dbsp/-get-output-type join-input-2))
+        join-1 (dbsp/->JoinOperator
+                (gensym "join-")
+                (dbsp/-get-output-type join-input-1)
+                (dbsp/-get-output-type join-input-2)
+                constraints)
+        join-2 (dbsp/->JoinOperator
+                (gensym "join-")
+                (dbsp/-get-output-type join-input-1)
+                (dbsp/-get-output-type join-input-2)
+                constraints)
+        delay-3 (dbsp/->DelayOperator (gensym "delay-") (dbsp/-get-output-type join-input-2))
+        final-add (dbsp/->AddOperator (gensym "add-") (dbsp/-get-output-type join-1))
+        circuit (-> circuit
+                    (add-op-inputs int-1 join-input-1)
+                    (add-op-inputs join-1 int-1 join-input-2)
+                    (add-op-inputs int-2 join-input-2)
+                    (add-op-inputs delay-3 int-2)
+                    (add-op-inputs join-2 join-input-1 delay-3)
+                    (add-op-inputs final-add join-1 join-2))]
+    (project-vars-from-op
+     circuit final-add
+     (set (-> final-add dbsp/-get-output-type dbsp/-to-vector)))))
 
 (defn- non-integrated-join [circuit op-1 op-2]
   (let [constraints (dbsp/-get-join-constraints
