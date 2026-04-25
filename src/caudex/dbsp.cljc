@@ -43,6 +43,9 @@
 (defn is-idx? [v]
   (= caudex.dbsp.ValIndex (type v)))
 
+(defn is-op? [in]
+  (satisfies? Operator in))
+
 ;; Assumes constraint is defined as [pred-fn val-index-1 val-index-2]
 (extend-type #?(:clj clojure.lang.PersistentVector
                 :cljs cljs.core/PersistentVector)

@@ -123,6 +123,9 @@
    graph
    nodes))
 
+(defn remove-edges [graph & edges]
+  (apply loom/remove-edges (into [graph] edges)))
+
 
 (defn connected-components [graph]
   (l.alg/connected-components graph))

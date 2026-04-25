@@ -639,17 +639,56 @@
             [circuit frontier])))
       [circuit frontier])))
 
- (defn- build-circuit*
+(defn- merge-filters [circuit]
+  (reduce
+   (fn [circuit node]
+     (let [child (->> node (graph/out-edges circuit) first :dest)
+           new-filters (into (:filters node)
+                             (map #(let [pred (dbsp/-get-pred %)
+                                         args (dbsp/-get-args %)]
+                                     (into [pred]
+                                           (map (fn [a]
+                                                  (if (and (dbsp/is-idx? a)
+                                                           (seq (:projections node)))
+                                                    (nth (:projections node) (:idx a))
+                                                    a)))
+                                           args)))
+                             (:filters child))
+           new-projections (if (seq (:projections child))
+                             (mapv
+                              (fn [p]
+                                (if (seq (:projections node))
+                                  (nth (:projections node) (:idx p))
+                                  p))
+                              (:projections child))
+                             (:projections node))
+           new-filter (dbsp/->FilterOperator
+                       (gensym "proj-")
+                       (first (dbsp/-get-input-types node)) new-filters new-projections)]
+       (-> circuit
+           (graph/replace-node node new-filter)
+           (graph/replace-node child new-filter)
+           (graph/remove-edges [new-filter new-filter]))))
+   circuit
+   (eduction
+    (filter utils/is-op?)
+    (filter #(= :filter (dbsp/-get-op-type %)))
+    (filter #(= 1 (graph/out-degree circuit %)))
+    (filter #(= :filter (->> % (graph/out-edges circuit) first :dest dbsp/-get-op-type)))
+    (graph/nodes circuit))))
+
+
+(defn- build-circuit*
   ([inputs query-graph rules]
    (build-circuit* inputs query-graph rules nil))
   ([inputs query-graph rules input-op-map
-     ;& {:keys [join-unconnected?] :or {join-unconnected? false}}
+                                        ;& {:keys [join-unconnected?] :or {join-unconnected? false}}
     ]
    (let [;; components (graph/connected-components query-graph)
-          ;; _ (when (and (> (count components) 1) (not join-unconnected?))
-          ;;     #?(:cljs (prn "Cannot have disjoint query components")
-          ;;        :clj (prn "Warning disjoint components in query")
-          ;;        ))
+         ;; _ (when (and (> (count components) 1) (not join-unconnected?))
+         ;;     #?(:cljs (prn "Cannot have disjoint query components")
+         ;;        :clj (prn "Warning disjoint components in query")
+         ;;        ))
          root (dbsp/->RootOperator (gensym "root-"))
          circuit (-> (graph/new-graph)
                      (graph/add-nodes root))
@@ -696,6 +735,7 @@
                      []
                      (mapv #(find-val-idx last-op %) proj-vars))
          c (add-op-inputs circuit projection last-op)
+         c (merge-filters c)
          ;;[c] (project-vars-from-op circuit last-op proj-vars)
          ]
      c)))
