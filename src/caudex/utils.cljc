@@ -3,10 +3,11 @@
    [caudex.graph :as graph]
    [caudex.dbsp :as dbsp]
    [clojure.string :as str]
+   [clojure.walk :as walk]
    [caudex.graph :as g]
    [datascript.built-ins :as d.fns]
    [clojure.core.protocols :refer [datafy Datafiable]]
-   ;; #?(:clj [com.phronemophobic.clj-graphviz :refer [render-graph]])
+   ;#?(:clj [com.phronemophobic.clj-graphviz :refer [render-graph]])
    #?(:clj [clojure.data.json :as json])))
 
 (defonce debug-data (atom nil))
@@ -48,19 +49,20 @@
 
 
 (defn circuit->edn [gr]
-  (let [to-edn #(if (graph/is-graph? %)
-                  (circuit->edn %)
-                  (if (satisfies? Datafiable %)
-                    (datafy %)
-                    %))]
+  (let [to-edn (fn to-edn [x]
+                 (cond
+                   (graph/is-graph? x) (circuit->edn x)
+                   (satisfies? Datafiable x) (datafy x)
+                   :else x))
+        walk-attrs #(walk/postwalk to-edn %)]
    {:nodes (mapv (fn [n]
                    [(to-edn n)
-                    (graph/attrs gr n)])
+                    (walk-attrs (graph/attrs gr n))])
                  (graph/nodes gr))
     :directed-edges (mapv
                      (fn [{:keys [src dest] :as edge}]
                        (conj (mapv to-edn [src dest])
-                             (graph/attrs gr edge)))
+                             (walk-attrs (graph/attrs gr edge))))
                      (graph/edges gr))}))
 
 (defn- edn->op [edn]
@@ -419,6 +421,11 @@
       parents))
 
 (comment
+  (prn-graph user/g)
+  (prn-graph
+   (caudex.utils/edn->circuit
+    (clojure.edn/read-string
+     (slurp "/Users/jumraiya/projects/wizard/benchmark/datalevin/circuits/datalevin-join-benchmark.edn"))))
   (doseq [view ["player-location"
                 "move-action"
                 "inspect-action"
