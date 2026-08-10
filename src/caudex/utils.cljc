@@ -7,7 +7,7 @@
    [caudex.graph :as g]
    [datascript.built-ins :as d.fns]
    [clojure.core.protocols :refer [datafy Datafiable]]
-   ;#?(:clj [com.phronemophobic.clj-graphviz :refer [render-graph]])
+   ;; #?(:clj [com.phronemophobic.clj-graphviz :refer [render-graph]])
    #?(:clj [clojure.data.json :as json])))
 
 (defonce debug-data (atom nil))
@@ -160,7 +160,7 @@
              url (js/URL.createObjectURL blob)
              link (.createElement js/document "a")]
          (set! (.-href link) url)
-         (set! (.-download link) "circuit_data.json")
+         (set! (.-download link) "circuit_data_2.json")
          (.click link)
          (js/URL.revokeObjectURL url)))
     data))
@@ -352,7 +352,19 @@
                      (let [{:keys [label required?]} (g/attrs query-graph edge)]
                        (if (and (is-non-datom-clause? query-graph dest)
                                 (= :arg (first label))
-                                (not (true? required?)))
+                                (or (not (true? required?))
+                                    ;; no datom clause or fn binding
+                                    ;; exists for dependency
+                                    (and
+                                     (= :or-join (g/attr query-graph dest :type))
+                                     (not
+                                      (some
+                                       #(when
+                                            (and (= (:src %) src)
+                                                 (= :pattern
+                                                    (g/attr query-graph % :clause-type)))
+                                            true)
+                                       (g/edges query-graph))))))
                          (g/add-directed-edges gr [dest src])
                          (g/add-directed-edges gr [src dest]))))
                    (g/new-graph)
