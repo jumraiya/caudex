@@ -352,19 +352,18 @@
                      (let [{:keys [label required?]} (g/attrs query-graph edge)]
                        (if (and (is-non-datom-clause? query-graph dest)
                                 (= :arg (first label))
-                                (or (not (true? required?))
-                                    ;; no datom clause or fn binding
-                                    ;; exists for dependency
-                                    (and
-                                     (= :or-join (g/attr query-graph dest :type))
-                                     (not
-                                      (some
-                                       #(when
-                                            (and (= (:src %) src)
-                                                 (= :pattern
-                                                    (g/attr query-graph % :clause-type)))
-                                            true)
-                                       (g/edges query-graph))))))
+                                (not (true? required?))
+                                ;; no datom clause or fn binding
+                                ;; exists for dependency
+                                (#{:or-join :rule} (g/attr query-graph dest :type))
+                                (not
+                                 (some
+                                  #(when
+                                    (and (= (:src %) src)
+                                         (= :pattern
+                                            (g/attr query-graph % :clause-type)))
+                                     true)
+                                  (g/edges query-graph))))
                          (g/add-directed-edges gr [dest src])
                          (g/add-directed-edges gr [src dest]))))
                    (g/new-graph)
@@ -433,7 +432,7 @@
       parents))
 
 (comment
-  (prn-graph user/g)
+  (prn-graph user/c)
   (prn-graph
    (caudex.utils/edn->circuit
     (clojure.edn/read-string
